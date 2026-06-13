@@ -1,0 +1,6 @@
+/mode <mode_name> <constraint>
+    Here mode name can be out of
+    -> chat
+    -> ft or fileTransfer
+    -> rs or remoteShell
+    ->
