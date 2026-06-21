@@ -67,3 +67,14 @@ We can exit the app by using /exit or ctrl+c or EOF.
 Emphasis for this project is mainly on the Networks and Security while maintaining scalability and modularity for future. These are the aspects for version 1
 
 Further versions broadly include more emphasis on the interface and scaling of the app
+
+UPDATE: 
+I am going to remove external configuration honestly and just make internal configuration work. 
+Also default mode will be config now
+The concept of auto connect depends on symmetric trust now.
+I have added three important states : ConnectedDevices, CurrentDevice and Mode.
+1. ConnectedDevices: Shows all the devices with which we have an active connection
+2. CurrentDevice: States the device we are communicating with right now.
+3. Mode: States the current mode we are in, in the device we are communicating with right now.
+
+There will also be broadcast commands to run on all devices from a device

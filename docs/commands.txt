@@ -1,6 +1,66 @@
-/mode <mode_name> <constraint>
+NOTE: Device number prefix and Device nickname and Device IP are interchangable/synonymous to the device
+
+/mode <mode_name>
     Here mode name can be out of
     -> chat
     -> ft or fileTransfer
     -> rs or remoteShell
-    ->
+    -> config
+
+
+
+
+>>> In chat mode (just type)
+
+
+
+>>> In ft mode
+ls <device_number_prefix>
+cd <device_number_prefix> <dir_name>
+pwd <device_number_prefix>
+
+transferto <local_file_path> <device_to_send_to> <destination_file_path>
+
+transferfrom <device_to_receive_from> <remote_path_address> <local_destination_address>
+
+union <local_directory> <remote_directory>
+
+intersect <local_directory> <remote_directory>
+
+
+
+>>>In rs mode we can exit the rs using
+ctrl+C
+link exit (Have to see if this is even possible)
+
+
+
+>>> In config mode
+stage
+
+viewDevices
+
+connect <Device_number_prefix>(or)<Device_ip>
+
+unstage
+
+trustedDevices
+
+trustedDevices <Device_name>(or)<Device_Public_ID> nickname <nickname>
+
+trustedDevices <Device_name>(or)<Device_Public_ID> remove(or)untrust
+
+connectedDevices
+
+currentDevice
+
+currentDevice <device_prefix_number>
+
+disconnect <Device_number_prefix>
+
+mode <mode_name> fix(or)default
+
+Broadcast commands(These run irrespective of state):
+
+/announce <message>
+/distribute <file_location>
