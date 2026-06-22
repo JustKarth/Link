@@ -7,3 +7,19 @@ type Tokenized struct{
 	Payload string
 	ErrorMessage string
 }
+
+type DeviceInfo struct{
+	UUID string `json:"uuid"`
+	DisplayName string `json:"display_name"`
+}
+
+type TrustedDevice struct{
+	UUID string `json:"uuid"`
+	DisplayName string `json:"display_name"`
+	NickName string `json:"nickname"`
+	PublicKey string `json:"public_key"`
+}
+
+type Config struct{
+	DefaultMode string `json:"default_mode"`
+}

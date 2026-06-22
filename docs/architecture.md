@@ -31,18 +31,37 @@ Trust Connection Process:
     Now it will autoconnect with all the devices it has symmetric trust with which are staged.
     Other than this for cases of asymmetric trust there has to be a Fresh Connection Process again but the auth isn't done for the trusted direction. (This will have to be added in fresh connection process as a check too)
 
-The cli can handle one device at a time. To switch to another device's control you must be connected and run the relevant command
 
-Chat mode: You directly type the message
+Modes:
 
-File Transfer mode: You transfer files using the commands
+    Chat mode: You directly type the message
 
-Remote Shell mode: Gives you access to remote shell
+    File Transfer mode: You transfer files using the commands
 
-Config mode: You can configure your link preferences in this mode
+    Remote Shell mode: Gives you access to remote shell
+
+    Config mode: You can configure your link preferences in this mode
+
+Data:
+    Persistent:
+        UUIDv4
+        Private Key
+        Public Key
+        Display Name
+        Trusted Devices (List)
+        Config preferences
+    Runtime:
+        Current Mode
+        IP Address
+        Current Device
+        Connected Devices
+        Auth Code (temporary)
+        
 
 The broadcast commands allow us to send something to all the trusted devices at a given time. Right now we have announce and distribute.
 Announce sends the message to connected devices with a prefix saying its an announcement from so and so device (whatever the nickname is).
 Distribute will send the prompt about sending the file to all devices and will transfer the file if accepted on the other end with Y. Else it won't be downloaded. The sender device gets an acknowledgement of who accepted the files and who rejected them.
+
+The cli can handle one device at a time. To switch to another device's control you must be connected and run the relevant command
 
 NOTE: Only the commands which run irrespective of mode have the prefix '/'

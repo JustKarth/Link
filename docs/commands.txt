@@ -44,6 +44,8 @@ connect <Device_number_prefix>(or)<Device_ip>
 
 unstage
 
+rename <new_name>
+
 trustedDevices
 
 trustedDevices <Device_name>(or)<Device_Public_ID> nickname <nickname>
