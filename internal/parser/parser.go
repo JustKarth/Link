@@ -25,7 +25,7 @@ func checkConfigCommand(cmd string) bool{
 	return false
 }
 
-func tokenize(msg string, mode string) structs.Tokenized{
+func Tokenize(msg string, mode string) structs.Tokenized{
 	var input structs.Tokenized
 	input.Tokens = strings.Fields(msg)
 

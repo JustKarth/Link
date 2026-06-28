@@ -23,3 +23,9 @@ type TrustedDevice struct{
 type Config struct{
 	DefaultMode string `json:"default_mode"`
 }
+
+type RuntimeData struct{
+	IsStaged bool
+	Mode string
+	
+}

@@ -1,18 +1,19 @@
 package initialize
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"github.com/google/uuid"
-	"link/internal/structs"
+	"bufio"
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"strings"
 	"errors"
-	"bufio"
-	"bytes"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/google/uuid"
+	"link/internal/helpers"
+	"link/internal/structs"
 )
 
 func fileExists(path string) bool {
@@ -23,24 +24,6 @@ func fileExists(path string) bool {
 
 func ensureDataDir() error {
 	return os.MkdirAll("data", 0755)
-}
-
-func saveJSON(path string, data any) error {
-	bytes, err := json.MarshalIndent(data, "", "    ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, bytes, 0644)
-}
-
-func loadJSON(path string, target any) error{
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal(bytes, target)
 }
 
 func askDisplayName() (string, error) {
@@ -99,7 +82,7 @@ func validateDeviceInfo(device structs.DeviceInfo) error{
 func ensureDeviceInfo() error {
 	if fileExists("data/deviceInfo.json") {
 		var device structs.DeviceInfo
-		err := loadJSON(
+		err := helpers.LoadJSON(
 			"data/deviceInfo.json",
 			&device,
 		)
@@ -123,7 +106,7 @@ func ensureDeviceInfo() error {
 		DisplayName: displayName,
 	}
 
-	return saveJSON("data/deviceInfo.json",	device)
+	return helpers.SaveJSON("data/deviceInfo.json", device)
 }
 
 func validateTrustedDevices(devices []structs.TrustedDevice) error{
@@ -144,7 +127,7 @@ func ensureTrustedDevices() error {
 	if fileExists("data/trustedDevices.json") {
 		var devices []structs.TrustedDevice
 
-		err := loadJSON("data/trustedDevices.json", &devices)
+		err := helpers.LoadJSON("data/trustedDevices.json", &devices)
 		if err == nil {
 			err = validateTrustedDevices(devices)
 			if err == nil {
@@ -157,7 +140,7 @@ func ensureTrustedDevices() error {
 
 	devices := []structs.TrustedDevice{}
 
-	return saveJSON("data/trustedDevices.json", devices)
+	return helpers.SaveJSON("data/trustedDevices.json", devices)
 }
 
 func validateConfig(config structs.Config) error{
@@ -172,7 +155,7 @@ func validateConfig(config structs.Config) error{
 func ensureConfig() error {
 	if fileExists("data/config.json") {
 		var config structs.Config
-		err := loadJSON("data/config.json",	&config)
+		err := helpers.LoadJSON("data/config.json", &config)
 		if err == nil {
 			err = validateConfig(config)
 			if err == nil {
@@ -187,7 +170,7 @@ func ensureConfig() error {
 		DefaultMode: "CHAT",
 	}
 
-	return saveJSON("data/config.json",	config)
+	return helpers.SaveJSON("data/config.json", config)
 }
 
 func validateKeys() error {
