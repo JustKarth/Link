@@ -4,7 +4,7 @@ Link is a cross-platform desktop application for transferring files and folders 
 
 ## Prerequisites
 - Java JDK 25
-- Maven 3.x
+- Maven 3.10.0
 
 ## Build and Run
 To compile and launch the application locally, run:
