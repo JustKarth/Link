@@ -1,0 +1,673 @@
+/* =========================================================================
+   Link — Premium JavaFX theme.
+   A restrained, layered dark UI inspired by AirDrop, Linear and modern
+   network tooling. Design tokens are defined once on .root and reused.
+   ========================================================================= */
+
+.root {
+    /* Surfaces */
+    -bg:           #0B0F14;  /* main window background */
+    -panel:        #121922;  /* elevated panels & cards */
+    -panel-2:      #161E29; /* more elevated / hover surfaces */
+    -panel-3:      #1C2733; /* inputs, wells */
+    -border:       #253140;  /* thin low-contrast borders */
+    -border-soft:  #1B2733;
+
+    /* Accents */
+    -accent:       #50E6FF;  /* primary cyan */
+    -accent-soft:  rgba(80, 230, 255, 0.14);
+    -accent-2:     #9B87FF;  /* secondary violet */
+    -accent-2-soft: rgba(155, 135, 255, 0.14);
+
+    /* Text */
+    -text:         #F2F5F8;
+    -text-2:       #8D9AAA;
+    -text-3:       #5E6B7A;
+
+    /* Semantic */
+    -success:      #41C9A2;
+    -warning:      #F5B664;
+    -error:        #EC6A6B;
+
+    /* Radii */
+    -r-sm: 8;
+    -r:    12;
+    -r-lg: 16;
+    -r-xl: 20;
+
+    -fx-background-color: -bg;
+    -fx-font-family: "System";
+    -fx-text-fill: -text;
+    -fx-font-smoothing-type: lcd;
+}
+
+/* ---- App shell ---------------------------------------------------------- */
+.app-root {
+    -fx-background-color: -bg;
+}
+
+.sidebar {
+    -fx-background-color: -panel;
+    -fx-border-width: 0 1 0 0;
+    -fx-border-color: -border-soft;
+    -fx-padding: 18 0 14 0;
+}
+
+.brand {
+    -fx-padding: 4 22 0 22;
+}
+.brand-wordmark {
+    -fx-font-size: 17;
+    -fx-font-weight: 600;
+    -fx-text-fill: -text;
+    -fx-letter-spacing: 0.4;
+}
+.brand-tagline {
+    -fx-font-size: 10.5;
+    -fx-text-fill: -text-3;
+    -fx-letter-spacing: 0.6;
+}
+
+.nav {
+    -fx-padding: 16 0 0 0;
+    -fx-spacing: 3;
+}
+.nav-section-label {
+    -fx-padding: 14 22 6 22;
+    -fx-font-size: 10;
+    -fx-text-fill: -text-3;
+    -fx-letter-spacing: 1.2;
+}
+
+.nav-item {
+    -fx-background-color: transparent;
+    -fx-background-radius: 10;
+    -fx-border-width: 0;
+    -fx-padding: 9 14 9 14;
+    -fx-alignment: CENTER_LEFT;
+    -fx-spacing: 12;
+    -fx-cursor: hand;
+}
+.nav-item:hover {
+    -fx-background-color: -panel-2;
+}
+.nav-item .nav-icon {
+    -fx-text-fill: -text-2;
+}
+.nav-item .nav-label {
+    -fx-font-size: 13;
+    -fx-text-fill: -text-2;
+}
+.nav-item .nav-badge {
+    -fx-background-color: -panel-3;
+    -fx-background-radius: 8;
+    -fx-padding: 1 8 1 8;
+    -fx-font-size: 10.5;
+    -fx-text-fill: -text-2;
+    -fx-font-weight: 600;
+}
+.nav-item.active {
+    -fx-background-color: -panel-2;
+}
+.nav-item.active .nav-icon { -fx-text-fill: -accent; }
+.nav-item.active .nav-label { -fx-text-fill: -text; -fx-font-weight: 600; }
+.nav-item.active .nav-badge { -fx-background-color: -accent-soft; -fx-text-fill: -accent; }
+
+/* Active indicator bar rendered as a left accent via border */
+.nav-indicator {
+    -fx-background-color: transparent;
+    -fx-background-radius: 2;
+    -fx-pref-width: 3;
+    -fx-min-width: 3;
+}
+.nav-item.active .nav-indicator {
+    -fx-background-color: -accent;
+    -fx-effect: dropshadow(gaussian, rgba(80,230,255,0.55), 8, 0.4, 0, 0);
+}
+
+/* Device identity footer */
+.device-id {
+    -fx-padding: 12 16 6 16;
+    -fx-background-color: -panel-2;
+    -fx-background-radius: 12;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-spacing: 10;
+    -fx-alignment: CENTER_LEFT;
+}
+.device-id-name { -fx-font-size: 12.5; -fx-font-weight: 600; -fx-text-fill: -text; }
+.device-id-status { -fx-font-size: 11; -fx-text-fill: -text-2; }
+.discovery-dot {
+    -fx-background-radius: 4;
+    -fx-min-width: 8; -fx-min-height: 8;
+    -fx-background-color: -accent;
+    -fx-effect: dropshadow(gaussian, rgba(80,230,255,0.6), 6, 0.5, 0, 0);
+}
+.discovery-dot.offline { -fx-background-color: -text-3; -fx-effect: null; }
+.discovery-dot.paused { -fx-background-color: -warning; -fx-effect: null; }
+
+/* ---- Content area ------------------------------------------------------- */
+.content {
+    -fx-background-color: -bg;
+    -fx-padding: 26 30 26 30;
+}
+.content-header {
+    -fx-spacing: 16;
+    -fx-alignment: CENTER_LEFT;
+}
+.page-title {
+    -fx-font-size: 23;
+    -fx-font-weight: 600;
+    -fx-text-fill: -text;
+    -fx-letter-spacing: 0.2;
+}
+.page-subtitle {
+    -fx-font-size: 12.5;
+    -fx-text-fill: -text-2;
+}
+.content-actions {
+    -fx-spacing: 10;
+    -fx-alignment: CENTER_RIGHT;
+}
+
+/* ---- Buttons ------------------------------------------------------------ */
+.btn {
+    -fx-background-radius: 9;
+    -fx-border-radius: 9;
+    -fx-cursor: hand;
+    -fx-font-size: 12.5;
+    -fx-content-display: LEFT;
+    -fx-graphic-text-gap: 8;
+    -fx-padding: 9 16 9 16;
+    -fx-alignment: CENTER;
+}
+.btn:disabled { -fx-cursor: default; -fx-opacity: 0.45; }
+
+.btn-primary {
+    -fx-background-color: -accent;
+    -fx-text-fill: #04141A;
+    -fx-font-weight: 600;
+    -fx-border-color: transparent;
+    -fx-effect: dropshadow(gaussian, rgba(80,230,255,0.35), 12, 0.3, 0, 0);
+}
+.btn-primary:hover {
+    -fx-background-color: #6CEBFF;
+    -fx-effect: dropshadow(gaussian, rgba(80,230,255,0.5), 16, 0.35, 0, 0);
+}
+.btn-primary:pressed { -fx-background-color: #3FD6F2; }
+
+.btn-secondary {
+    -fx-background-color: -panel-2;
+    -fx-text-fill: -text;
+    -fx-border-color: -border;
+    -fx-border-width: 1;
+}
+.btn-secondary:hover { -fx-background-color: -panel-3; }
+.btn-secondary:pressed { -fx-background-color: #243140; }
+
+.btn-ghost {
+    -fx-background-color: transparent;
+    -fx-text-fill: -text-2;
+    -fx-border-color: transparent;
+    -fx-padding: 7 10 7 10;
+}
+.btn-ghost:hover { -fx-background-color: -panel-2; -fx-text-fill: -text; }
+
+.btn-icon {
+    -fx-background-color: transparent;
+    -fx-text-fill: -text-2;
+    -fx-padding: 7;
+    -fx-background-radius: 8;
+    -fx-border-width: 0;
+    -fx-cursor: hand;
+}
+.btn-icon:hover { -fx-background-color: -panel-2; -fx-text-fill: -text; }
+
+/* ---- Panels / cards ---------------------------------------------------- */
+.panel {
+    -fx-background-color: -panel;
+    -fx-background-radius: 16;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 16;
+}
+.card {
+    -fx-background-color: -panel;
+    -fx-background-radius: 12;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-cursor: hand;
+}
+.card:hover { -fx-background-color: -panel-2; -fx-border-color: -border; }
+.card.selected {
+    -fx-background-color: -panel-2;
+    -fx-border-color: -accent;
+    -fx-border-width: 1;
+    -fx-effect: dropshadow(gaussian, rgba(80,230,255,0.18), 14, 0.2, 0, 0);
+}
+.card.selected-accent2 {
+    -fx-border-color: -accent-2;
+    -fx-effect: dropshadow(gaussian, rgba(155,135,255,0.18), 14, 0.2, 0, 0);
+}
+
+/* Device card */
+.device-card {
+    -fx-padding: 14 14 13 14;
+    -fx-spacing: 10;
+}
+.device-card-icon-wrap {
+    -fx-background-color: -panel-3;
+    -fx-background-radius: 10;
+    -fx-min-width: 42; -fx-min-height: 42; -fx-pref-width: 42; -fx-pref-height: 42;
+    -fx-alignment: CENTER;
+}
+.device-card-icon { -fx-text-fill: -text-2; }
+.device-card.selected .device-card-icon { -fx-text-fill: -accent; }
+.device-name { -fx-font-size: 13.5; -fx-font-weight: 600; -fx-text-fill: -text; }
+.device-meta { -fx-font-size: 11; -fx-text-fill: -text-2; }
+.device-ip { -fx-font-size: 10.5; -fx-text-fill: -text-3; -fx-font-family: "Menlo"; }
+
+.status-row { -fx-spacing: 7; -fx-alignment: CENTER_LEFT; }
+.status-dot {
+    -fx-background-radius: 5;
+    -fx-min-width: 7; -fx-min-height: 7; -fx-pref-width: 7; -fx-pref-height: 7;
+}
+.status-dot.online { -fx-background-color: -success; }
+.status-dot.away { -fx-background-color: -warning; }
+.status-dot.offline { -fx-background-color: -text-3; }
+.status-label { -fx-font-size: 10.5; -fx-text-fill: -text-2; }
+
+/* ---- Transfer card ----------------------------------------------------- */
+.transfer-card {
+    -fx-padding: 13 14 13 14;
+    -fx-spacing: 12;
+}
+.file-icon-wrap {
+    -fx-background-radius: 10;
+    -fx-min-width: 40; -fx-min-height: 40; -fx-pref-width: 40; -fx-pref-height: 40;
+    -fx-alignment: CENTER;
+}
+.file-icon { -fx-font-size: 14; -fx-text-fill: -text; }
+.transfer-name { -fx-font-size: 13; -fx-font-weight: 600; -fx-text-fill: -text; }
+.transfer-meta { -fx-font-size: 11; -fx-text-fill: -text-2; }
+.transfer-size { -fx-font-size: 11; -fx-text-fill: -text-3; }
+
+/* Progress */
+.progress-track {
+    -fx-background-color: -panel-3;
+    -fx-background-radius: 10;
+    -fx-pref-height: 6; -fx-min-height: 6; -fx-max-height: 6;
+}
+.progress-fill {
+    -fx-background-color: -accent;
+    -fx-background-radius: 10;
+    -fx-effect: dropshadow(gaussian, rgba(80,230,255,0.45), 6, 0.4, 0, 0);
+}
+.progress-fill.incoming { -fx-background-color: -accent-2; -fx-effect: dropshadow(gaussian, rgba(155,135,255,0.4), 6, 0.4, 0, 0); }
+.progress-fill.completed { -fx-background-color: -success; -fx-effect: null; }
+.progress-fill.failed { -fx-background-color: -error; -fx-effect: null; }
+.progress-fill.paused { -fx-background-color: -text-3; -fx-effect: null; }
+.progress-fill.cancelled { -fx-background-color: -text-3; -fx-effect: null; }
+
+.pill {
+    -fx-background-radius: 7;
+    -fx-padding: 2 8 2 8;
+    -fx-font-size: 10;
+    -fx-font-weight: 600;
+    -fx-letter-spacing: 0.4;
+}
+.pill-progress { -fx-background-color: -accent-soft; -fx-text-fill: -accent; }
+.pill-completed { -fx-background-color: rgba(65,201,162,0.14); -fx-text-fill: -success; }
+.pill-failed { -fx-background-color: rgba(236,106,107,0.14); -fx-text-fill: -error; }
+.pill-paused { -fx-background-color: rgba(143,154,170,0.14); -fx-text-fill: -text-2; }
+.pill-cancelled { -fx-background-color: rgba(143,154,170,0.14); -fx-text-fill: -text-2; }
+.pill-pending { -fx-background-color: rgba(245,182,100,0.14); -fx-text-fill: -warning; }
+.pill-demo { -fx-background-color: -panel-3; -fx-text-fill: -text-3; -fx-border-color: -border-soft; -fx-border-width: 1; -fx-border-radius: 7; }
+.pill-incoming { -fx-background-color: -accent-2-soft; -fx-text-fill: -accent-2; }
+.pill-outgoing { -fx-background-color: -accent-soft; -fx-text-fill: -accent; }
+
+.dir-icon { -fx-font-size: 12; -fx-text-fill: -text-2; }
+
+/* ---- Filter chips ------------------------------------------------------ */
+.chip {
+    -fx-background-color: -panel-2;
+    -fx-background-radius: 9;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 9;
+    -fx-text-fill: -text-2;
+    -fx-font-size: 12;
+    -fx-padding: 6 14 6 14;
+    -fx-cursor: hand;
+}
+.chip:hover { -fx-background-color: -panel-3; -fx-text-fill: -text; }
+.chip.selected {
+    -fx-background-color: -accent-soft;
+    -fx-border-color: -accent;
+    -fx-text-fill: -accent;
+    -fx-font-weight: 600;
+}
+
+/* ---- Text field / inputs ---------------------------------------------- */
+.field, .text-field {
+    -fx-background-color: -panel-3;
+    -fx-background-radius: 9;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 9;
+    -fx-text-fill: -text;
+    -fx-prompt-text-fill: -text-3;
+    -fx-font-size: 13;
+    -fx-padding: 9 12 9 12;
+}
+.field:focused, .text-field:focused {
+    -fx-border-color: -accent;
+    -fx-effect: dropshadow(gaussian, rgba(80,230,255,0.25), 10, 0.2, 0, 0);
+}
+.field.error, .text-field.error {
+    -fx-border-color: -error;
+    -fx-effect: dropshadow(gaussian, rgba(236,106,107,0.25), 10, 0.2, 0, 0);
+}
+.field-error-text { -fx-font-size: 11; -fx-text-fill: -error; }
+.field-hint { -fx-font-size: 11; -fx-text-fill: -text-3; }
+
+/* ---- Toggle switch ---------------------------------------------------- */
+.toggle {
+    -fx-background-color: -panel-3;
+    -fx-background-radius: 13;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 13;
+    -fx-cursor: hand;
+    -fx-min-width: 44; -fx-pref-width: 44; -fx-min-height: 26; -fx-pref-height: 26;
+}
+.toggle.on {
+    -fx-background-color: -accent;
+    -fx-border-color: transparent;
+    -fx-effect: dropshadow(gaussian, rgba(80,230,255,0.4), 8, 0.3, 0, 0);
+}
+.toggle-thumb {
+    -fx-background-color: #EAF6FB;
+    -fx-background-radius: 10;
+    -fx-min-width: 20; -fx-pref-width: 20; -fx-min-height: 20; -fx-pref-height: 20;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 4, 0.2, 0, 1);
+}
+.toggle .toggle-thumb { -fx-background-color: -text-2; }
+.toggle.on .toggle-thumb { -fx-background-color: #FFFFFF; }
+
+/* ---- Section / settings ----------------------------------------------- */
+.settings-section { -fx-padding: 0 0 10 0; }
+.settings-row {
+    -fx-padding: 13 16 13 16;
+    -fx-background-color: -panel;
+    -fx-background-radius: 12;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-spacing: 16;
+    -fx-alignment: CENTER_LEFT;
+}
+.settings-row.first { -fx-background-radius: 12 12 0 0; }
+.settings-row.last { -fx-background-radius: 0 0 12 12; -fx-border-width: 1 1 1 1; }
+.settings-row.single { -fx-background-radius: 12; }
+
+.setting-label { -fx-font-size: 13; -fx-font-weight: 600; -fx-text-fill: -text; }
+.setting-desc { -fx-font-size: 11.5; -fx-text-fill: -text-2; }
+.setting-section-title { -fx-font-size: 11; -fx-text-fill: -text-3; -fx-letter-spacing: 1; -fx-padding: 0 4 8 4; }
+
+/* ---- Empty / loading states ------------------------------------------- */
+.empty-state {
+    -fx-alignment: CENTER;
+    -fx-spacing: 12;
+    -fx-padding: 50 20 50 20;
+}
+.empty-icon { -fx-text-fill: -text-3; }
+.empty-title { -fx-font-size: 15; -fx-font-weight: 600; -fx-text-fill: -text; }
+.empty-desc { -fx-font-size: 12.5; -fx-text-fill: -text-2; -fx-text-alignment: CENTER; }
+
+/* ---- Activity --------------------------------------------------------- */
+.activity-item {
+    -fx-padding: 12 16 12 16;
+    -fx-background-color: -panel;
+    -fx-background-radius: 12;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-spacing: 12;
+    -fx-alignment: CENTER_LEFT;
+}
+.activity-item:hover { -fx-background-color: -panel-2; }
+.activity-file { -fx-font-size: 13; -fx-font-weight: 600; -fx-text-fill: -text; }
+.activity-meta { -fx-font-size: 11; -fx-text-fill: -text-2; }
+.activity-time { -fx-font-size: 10.5; -fx-text-fill: -text-3; }
+
+/* ---- Search ---------------------------------------------------------- */
+.search-box {
+    -fx-background-color: -panel;
+    -fx-background-radius: 9;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 9;
+    -fx-padding: 0 12 0 12;
+    -fx-spacing: 8;
+    -fx-alignment: CENTER_LEFT;
+}
+.search-icon { -fx-text-fill: -text-3; }
+
+/* ---- Tabs ------------------------------------------------------------ */
+.tab-bar { -fx-spacing: 4; -fx-alignment: CENTER_LEFT; }
+.tab {
+    -fx-background-color: transparent;
+    -fx-background-radius: 9;
+    -fx-border-width: 0;
+    -fx-text-fill: -text-2;
+    -fx-font-size: 12.5;
+    -fx-padding: 7 14 7 14;
+    -fx-cursor: hand;
+}
+.tab:hover { -fx-background-color: -panel-2; -fx-text-fill: -text; }
+.tab.selected {
+    -fx-background-color: -panel-2;
+    -fx-text-fill: -text;
+    -fx-font-weight: 600;
+}
+.tab-count {
+    -fx-background-color: -panel-3;
+    -fx-background-radius: 7;
+    -fx-text-fill: -text-2;
+    -fx-font-size: 10;
+    -fx-padding: 1 6 1 6;
+}
+.tab.selected .tab-count { -fx-background-color: -accent-soft; -fx-text-fill: -accent; }
+
+/* ---- Dialog ---------------------------------------------------------- */
+.dialog-overlay {
+    -fx-background-color: rgba(7, 10, 14, 0.55);
+    -fx-alignment: CENTER;
+}
+.dialog {
+    -fx-background-color: -panel;
+    -fx-background-radius: 20;
+    -fx-border-color: -border;
+    -fx-border-width: 1;
+    -fx-border-radius: 20;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.55), 30, 0.2, 0, 8);
+    -fx-padding: 22 22 18 22;
+    -fx-spacing: 14;
+    -fx-max-width: 520;
+}
+.dialog-title { -fx-font-size: 16; -fx-font-weight: 600; -fx-text-fill: -text; }
+.dialog-subtitle { -fx-font-size: 12.5; -fx-text-fill: -text-2; }
+
+/* Drop area for file selection */
+.drop-area {
+    -fx-background-color: -panel-2;
+    -fx-background-radius: 12;
+    -fx-border-color: -border;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 12;
+    -fx-alignment: CENTER;
+    -fx-spacing: 8;
+    -fx-padding: 26 20 26 20;
+    -fx-border-style: dashed;
+    -fx-border-color: -border;
+}
+.drop-area.over { -fx-border-color: -accent; -fx-background-color: -accent-soft; }
+.drop-area .drop-title { -fx-font-size: 13.5; -fx-font-weight: 600; -fx-text-fill: -text; }
+.drop-area .drop-desc { -fx-font-size: 11.5; -fx-text-fill: -text-2; }
+
+/* Selected file row */
+.sel-file-row {
+    -fx-background-color: -panel-2;
+    -fx-background-radius: 9;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 9;
+    -fx-padding: 9 10 9 10;
+    -fx-spacing: 10;
+    -fx-alignment: CENTER_LEFT;
+}
+.sel-file-name { -fx-font-size: 12.5; -fx-text-fill: -text; -fx-font-weight: 500; }
+.sel-file-size { -fx-font-size: 11; -fx-text-fill: -text-3; }
+
+/* Toast / notice */
+.notice {
+    -fx-background-color: -panel-2;
+    -fx-background-radius: 9;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 9;
+    -fx-padding: 9 12 9 12;
+    -fx-spacing: 8;
+    -fx-alignment: CENTER_LEFT;
+}
+.notice-info { -fx-border-color: -accent; }
+.notice-demo {
+    -fx-background-color: rgba(155,135,255,0.10);
+    -fx-border-color: -accent-2;
+}
+.notice-text { -fx-font-size: 11.5; -fx-text-fill: -text-2; }
+
+/* Misc text helpers */
+.muted { -fx-text-fill: -text-2; }
+.tiny { -fx-text-fill: -text-3; -fx-font-size: 10.5; }
+.mono { -fx-font-family: "Menlo"; }
+
+/* ---- Scrollbars ------------------------------------------------------ */
+.scroll-pane {
+    -fx-background-color: transparent;
+    -fx-fit-to-width: true;
+    -fx-fit-to-height: true;
+}
+.scroll-pane > .viewport { -fx-background-color: transparent; }
+.scroll-bar { -fx-background-color: transparent; -fx-padding: 0; }
+.scroll-bar:horizontal { -fx-pref-height: 8; }
+.scroll-bar:vertical { -fx-pref-width: 8; }
+.scroll-bar .thumb {
+    -fx-background-color: #2A3744;
+    -fx-background-radius: 4;
+    -fx-cursor: default;
+}
+.scroll-bar .thumb:hover { -fx-background-color: #3A4A59; }
+.scroll-bar .increment-button, .scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+.scroll-bar .increment-arrow, .scroll-bar .decrement-arrow {
+    -fx-shape: "";
+    -fx-padding: 0;
+}
+
+/* ---- Misc ----------------------------------------------------------- */
+.divider {
+    -fx-background-color: -border-soft;
+    -fx-pref-height: 1; -fx-min-height: 1; -fx-max-height: 1;
+}
+.viz-wrap { -fx-background-color: transparent; }
+
+/* =========================================================================
+   Redesign additions — Nearby screen spatial layout
+   ========================================================================= */
+
+/* ---- Sidebar refinement ------------------------------------------------- */
+.sidebar {
+    -fx-background-color: -panel;
+    -fx-border-width: 0 1 0 0;
+    -fx-border-color: rgba(27,39,51,0.9);
+    -fx-pref-width: 224;
+}
+.brand-wordmark { -fx-font-size: 15.5; -fx-letter-spacing: 0.3; }
+.nav-item { -fx-padding: 8 12 8 12; }
+
+/* ---- Nearby header ------------------------------------------------------ */
+.nearby-header {
+    -fx-padding: 4 0 14 0;
+    -fx-border-color: transparent transparent -border-soft transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+/* ---- Destination panel -------------------------------------------------- */
+.dest-panel {
+    -fx-padding: 12 16 12 16;
+    -fx-margin: 12 0 0 0;
+}
+.dest-tag {
+    -fx-font-size: 9;
+    -fx-font-weight: 700;
+    -fx-text-fill: -accent;
+    -fx-letter-spacing: 1.2;
+}
+
+/* ---- Transfer card improvements ----------------------------------------- */
+.dir-badge {
+    -fx-background-radius: 6;
+    -fx-padding: 2 7 2 7;
+    -fx-font-size: 9.5;
+    -fx-font-weight: 700;
+    -fx-letter-spacing: 0.5;
+}
+.dir-badge-out {
+    -fx-background-color: rgba(80,230,255,0.12);
+    -fx-text-fill: -accent;
+    -fx-border-color: rgba(80,230,255,0.28);
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+}
+.dir-badge-in {
+    -fx-background-color: rgba(155,135,255,0.12);
+    -fx-text-fill: -accent-2;
+    -fx-border-color: rgba(155,135,255,0.28);
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+}
+
+/* ---- Activity timeline improvements ------------------------------------- */
+.activity-group-header {
+    -fx-font-size: 10;
+    -fx-font-weight: 700;
+    -fx-text-fill: -text-3;
+    -fx-letter-spacing: 1.1;
+    -fx-padding: 16 0 6 2;
+}
+
+/* ---- Transfers header --------------------------------------------------- */
+.transfers-title-row {
+    -fx-padding: 0 0 16 0;
+    -fx-border-color: transparent transparent -border-soft transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+/* ---- Send beam feedback badge ------------------------------------------- */
+.beam-notice {
+    -fx-background-color: rgba(80,230,255,0.12);
+    -fx-background-radius: 10;
+    -fx-border-color: rgba(80,230,255,0.35);
+    -fx-border-width: 1;
+    -fx-border-radius: 10;
+    -fx-padding: 8 14 8 14;
+    -fx-font-size: 11.5;
+    -fx-text-fill: -accent;
+    -fx-font-weight: 600;
+}
