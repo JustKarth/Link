@@ -1,7 +1,6 @@
 package com.link.ui.components;
 
 import com.link.ui.demo.DemoDevice;
-import com.link.ui.demo.DemoTransfer;
 import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
 import com.link.ui.util.FormatUtil;
@@ -29,11 +28,13 @@ import java.util.Set;
  *   <li><b>Select</b> — drag-and-drop or open a native {@link FileChooser} to
  *       add real files (metadata only). Each file is listed with type icon,
  *       size and a remove control, plus a running total.</li>
- *   <li><b>Review</b> — shows the destination device and the files, with a
- *       clear "simulated" notice, then a Send action.</li>
+ *   <li><b>Review</b> — shows the destination device and the files, then a
+ *       Send action that submits a real transfer request to the backend.</li>
  * </ol>
- * On confirm it creates demo transfers (simulated) and never claims a real
- * delivery happened.
+ * On confirm it calls {@link LinkViewModel#addOutgoingTransfers} and only
+ * navigates away when at least one transfer was successfully registered.
+ * If the destination peer is no longer reachable an inline error is shown
+ * inside the dialog so the user can decide what to do.
  */
 public class FileSelectionDialog {
 
@@ -246,30 +247,37 @@ public class FileSelectionDialog {
         Label total = new Label(files.size() + " files · " + FormatUtil.formatBytes(sum));
         total.getStyleClass().add("tiny");
 
-        Label notice = new Label("Simulated transfer — no real files will be sent. This creates demo "
-                + "transfer entries that animate to completion.");
+        Label notice = new Label(
+                "Sending a transfer request to " + destination.getName() + ". "
+                + "The receiving device will need to accept it before any files are transferred.");
         notice.getStyleClass().add("notice-text");
         notice.setWrapText(true);
         VBox noticeBox = new VBox(notice);
-        noticeBox.setStyle("-fx-background-color: " + Theme.toRgba(Theme.ACCENT_2, 0.10) + ";"
-                + "-fx-border-color: " + Theme.toRgba(Theme.ACCENT_2, 0.5) + ";"
-                + "-fx-background-radius: 9; -fx-border-radius: 9; -fx-padding: 9 12;");
+        noticeBox.getStyleClass().addAll("notice", "notice-info");
 
         Button back = new Button("Back");
         back.getStyleClass().addAll("btn", "btn-secondary");
         back.setOnAction(e -> render(Step.SELECT));
 
-        Button send = new Button("Send — simulated");
+        Button send = new Button("Send Request");
         send.getStyleClass().addAll("btn", "btn-primary");
         send.setGraphic(Icons.send(15, Theme.BG.darker()));
-        send.setOnAction(e -> confirmSend());
+
+        // Error label shown inline when the peer is unreachable at send time.
+        Label sendError = new Label();
+        sendError.getStyleClass().add("field-error-text");
+        sendError.setWrapText(true);
+        sendError.setManaged(false);
+        sendError.setVisible(false);
+
+        send.setOnAction(e -> confirmSend(send, sendError));
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox actions = new HBox(10, back, spacer, send);
         actions.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
-        body.getChildren().addAll(title, dest, destRow, scroll, total, noticeBox, actions);
+        body.getChildren().addAll(title, dest, destRow, scroll, total, noticeBox, sendError, actions);
     }
 
     private HBox reviewFileRow(File f) {
@@ -291,8 +299,30 @@ public class FileSelectionDialog {
         return row;
     }
 
-    private void confirmSend() {
-        List<DemoTransfer> created = state.addOutgoingTransfers(files, destination);
+    private void confirmSend(Button sendBtn, Label errorLabel) {
+        sendBtn.setDisable(true);
+        LinkViewModel.SendResult result = state.addOutgoingTransfers(files, destination);
+
+        if (!result.succeeded()) {
+            // Show inline error; keep the dialog open so the user can act.
+            String msg = switch (result.getFailure()) {
+                case PEER_NOT_FOUND ->
+                        destination.getName() + " is no longer reachable. "
+                        + "Close this dialog, wait for the device to reappear, and try again.";
+                case COORDINATOR_ERROR -> {
+                    String detail = result.getErrorDetail();
+                    yield "Transfer request failed"
+                            + (detail != null && !detail.isBlank() ? ": " + detail : ".")
+                            + " Please try again.";
+                }
+            };
+            errorLabel.setText(msg);
+            errorLabel.setManaged(true);
+            errorLabel.setVisible(true);
+            sendBtn.setDisable(false);
+            return;
+        }
+
         close();
         if (onSent != null) onSent.run();
     }

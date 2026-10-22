@@ -17,6 +17,8 @@ import com.link.ui.demo.TransferStatus;
 import javafx.application.Platform;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -349,35 +351,87 @@ public class LinkViewModel {
     }
 
     // =========================================================================
+    // Send result — returned to callers so they can show a specific error
+    // =========================================================================
+
+    /**
+     * Outcome of {@link #addOutgoingTransfers}. Callers should inspect
+     * {@link #succeeded()} before navigating away or playing animations.
+     */
+    public static final class SendResult {
+        /** Reason a send attempt did not produce any transfers. */
+        public enum Failure { PEER_NOT_FOUND, COORDINATOR_ERROR }
+
+        private final List<DemoTransfer> transfers;
+        private final Failure failure;
+        private final String errorDetail;
+
+        private SendResult(List<DemoTransfer> transfers) {
+            this.transfers   = transfers;
+            this.failure     = null;
+            this.errorDetail = null;
+        }
+
+        private SendResult(Failure failure, String detail) {
+            this.transfers   = List.of();
+            this.failure     = failure;
+            this.errorDetail = detail;
+        }
+
+        /** {@code true} when at least one transfer was registered with the backend. */
+        public boolean succeeded() { return !transfers.isEmpty(); }
+
+        /** Non-null only when {@link #succeeded()} is {@code false}. */
+        public Failure getFailure() { return failure; }
+
+        /** Human-readable detail for error display; may be {@code null}. */
+        public String getErrorDetail() { return errorDetail; }
+
+        /** The created transfer objects; empty when {@link #succeeded()} is {@code false}. */
+        public List<DemoTransfer> getTransfers() { return transfers; }
+
+        static SendResult ok(List<DemoTransfer> list)            { return new SendResult(list); }
+        static SendResult peerGone()                             { return new SendResult(Failure.PEER_NOT_FOUND, null); }
+        static SendResult coordinatorError(String detail)        { return new SendResult(Failure.COORDINATOR_ERROR, detail); }
+    }
+
+    // =========================================================================
     // Initiating outgoing transfers
     // =========================================================================
 
     /**
-     * Creates a real outgoing transfer for each of the supplied files, targeting
-     * the given destination device. Returns the created {@link DemoTransfer}
-     * objects so the caller can navigate to the Transfers screen immediately.
+     * Creates a real outgoing transfer request for each of the supplied files,
+     * targeting the given destination device. Returns a {@link SendResult} so
+     * the caller can distinguish success from specific failure modes and show
+     * an appropriate error instead of silently navigating away.
      *
      * <p>This replaces {@code PrototypeState#addOutgoingTransfers} with a real
      * backend call to {@link com.link.application.TransferCoordinator#requestTransfer}.
      *
      * @param files       Files chosen by the user (null or non-file entries are skipped)
      * @param destination The target peer device
-     * @return Newly created transfer objects (may be empty if no valid files)
+     * @return A {@link SendResult} describing the outcome
      */
-    public List<DemoTransfer> addOutgoingTransfers(List<? extends File> files, DemoDevice destination) {
+    public SendResult addOutgoingTransfers(List<? extends File> files, DemoDevice destination) {
         Objects.requireNonNull(destination, "destination");
 
         List<Path> sourcePaths = new ArrayList<>();
         for (File f : files) {
             if (f != null && f.isFile()) sourcePaths.add(f.toPath());
         }
-        if (sourcePaths.isEmpty()) return List.of();
+        if (sourcePaths.isEmpty()) return SendResult.peerGone();
 
         // Resolve the real Peer object for this device id.
-        Peer peer = findRealPeer(destination.getId());
+        Peer peer;
+        try {
+            peer = findRealPeer(destination.getId());
+        } catch (Exception e) {
+            return SendResult.coordinatorError("Discovery error: " + e.getMessage());
+        }
+
         if (peer == null) {
-            // Peer disappeared since the UI last refreshed — swallow gracefully.
-            return List.of();
+            // Peer disappeared since the UI last refreshed.
+            return SendResult.peerGone();
         }
 
         List<DemoTransfer> created = new ArrayList<>();
@@ -388,9 +442,14 @@ public class LinkViewModel {
                     ? name.substring(name.lastIndexOf('.') + 1)
                     : "";
 
-            // Register with the real coordinator; it creates a persistence record.
-            UUID transferId = engine.getTransferCoordinator()
-                    .requestTransfer(peer.id(), List.of(path));
+            UUID transferId;
+            try {
+                transferId = engine.getTransferCoordinator()
+                        .requestTransfer(peer.id(), List.of(path));
+            } catch (Exception e) {
+                // One file failed; surface the error and stop.
+                return SendResult.coordinatorError(e.getMessage());
+            }
 
             DemoTransfer dt = new DemoTransfer(
                     transferId.toString(),
@@ -409,7 +468,7 @@ public class LinkViewModel {
         }
 
         fireChange();
-        return created;
+        return SendResult.ok(created);
     }
 
     // =========================================================================
@@ -419,13 +478,44 @@ public class LinkViewModel {
     /**
      * Accepts an incoming transfer, setting the destination to the path
      * configured in {@link SettingsModel#getDownloadDestination()}.
+     * Validates that the download directory exists (or can be created) before
+     * calling the coordinator.
      *
      * @param transferId String representation of the transfer UUID
      */
     public void acceptTransfer(String transferId) {
-        UUID id = UUID.fromString(transferId);
-        Path dest = Path.of(settings.getDownloadDestination());
-        engine.getTransferCoordinator().acceptTransfer(id, dest);
+        UUID id;
+        try {
+            id = UUID.fromString(transferId);
+        } catch (IllegalArgumentException e) {
+            return; // malformed id — defensive guard
+        }
+
+        // Validate that the download destination is usable before we hand it
+        // to the coordinator.
+        Path dest;
+        try {
+            dest = Path.of(settings.getDownloadDestination());
+        } catch (InvalidPathException e) {
+            updateTransferStatus(transferId, TransferStatus.FAILED);
+            return;
+        }
+        if (!Files.isDirectory(dest)) {
+            try {
+                Files.createDirectories(dest);
+            } catch (Exception e) {
+                // Cannot create directory — mark transfer failed and bail.
+                updateTransferStatus(transferId, TransferStatus.FAILED);
+                return;
+            }
+        }
+
+        try {
+            engine.getTransferCoordinator().acceptTransfer(id, dest);
+        } catch (Exception e) {
+            updateTransferStatus(transferId, TransferStatus.FAILED);
+            return;
+        }
         updateTransferStatus(transferId, TransferStatus.IN_PROGRESS);
     }
 
@@ -435,8 +525,17 @@ public class LinkViewModel {
      * @param transferId String representation of the transfer UUID
      */
     public void rejectTransfer(String transferId) {
-        UUID id = UUID.fromString(transferId);
-        engine.getTransferCoordinator().rejectTransfer(id);
+        UUID id;
+        try {
+            id = UUID.fromString(transferId);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        try {
+            engine.getTransferCoordinator().rejectTransfer(id);
+        } catch (Exception e) {
+            // Coordinator rejection failed; still update local UI state.
+        }
         updateTransferStatus(transferId, TransferStatus.FAILED);
     }
 
@@ -449,7 +548,12 @@ public class LinkViewModel {
         DemoTransfer dt = transfersById.get(transferId);
         if (dt == null || dt.isTerminal()) return;
 
-        engine.getTransferCoordinator().cancelTransfer(UUID.fromString(transferId));
+        try {
+            engine.getTransferCoordinator().cancelTransfer(UUID.fromString(transferId));
+        } catch (Exception e) {
+            // Coordinator may not know about this id yet (e.g. PENDING before
+            // the remote accepted) — still update local UI state.
+        }
         dt.setStatus(TransferStatus.CANCELLED);
         dt.setSpeedBytesPerSecond(0);
         fireChange();
@@ -485,10 +589,21 @@ public class LinkViewModel {
     }
 
     /**
-     * Retries a failed or cancelled transfer by resubmitting it to the
-     * coordinator. Progress is reset to zero.
+     * Attempts to retry a failed or cancelled transfer.
      *
-     * @param transferId String representation of the transfer UUID
+     * <p><strong>Current limitation:</strong> {@link DemoTransfer} stores only the
+     * bare file name (e.g. {@code "report.pdf"}), not the original absolute path
+     * that {@link com.link.application.TransferCoordinator#requestTransfer} needs.
+     * Reconstructing a path from the file name alone would produce a relative path
+     * in the working directory, which is almost certainly wrong. Rather than pass
+     * a bogus path to the coordinator, this method leaves the transfer in its
+     * current terminal state (FAILED) and does not create a new request.
+     *
+     * <p>Retry will become functional when the transfer record stores the
+     * original source path. Until then the Retry button is honest — clicking
+     * it does not change the card's state, so it continues to show "Failed".
+     *
+     * @param transferId String representation of the original transfer UUID
      */
     public void retryTransfer(String transferId) {
         DemoTransfer dt = transfersById.get(transferId);
@@ -496,17 +611,12 @@ public class LinkViewModel {
         if (dt.getStatus() != TransferStatus.FAILED
                 && dt.getStatus() != TransferStatus.CANCELLED) return;
 
-        // Look up the peer for this transfer; if found, re-request.
-        // The peer name is stored on the DemoTransfer so we can search.
-        Peer peer = findRealPeerByDisplayName(dt.getDeviceName());
-        if (peer != null) {
-            // Re-register with the coordinator — a new transferId is issued.
-            // We update the map entry in-place so the view card stays stable.
-            dt.setStatus(TransferStatus.PENDING);
-            dt.setProgress(0.0);
-            dt.setSpeedBytesPerSecond(0);
-            fireChange();
-        }
+        // The original absolute file path is not stored on DemoTransfer.
+        // We cannot reliably reconstruct it from the file name alone, so we
+        // do NOT call requestTransfer with a potentially incorrect path.
+        // Leave the transfer in a consistent FAILED state.
+        dt.setStatus(TransferStatus.FAILED);
+        fireChange();
     }
 
     // =========================================================================

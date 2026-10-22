@@ -544,6 +544,14 @@
     -fx-alignment: CENTER_LEFT;
 }
 .notice-info { -fx-border-color: -accent; }
+.notice-warn {
+    -fx-background-color: rgba(245,182,100,0.10);
+    -fx-border-color: -warning;
+}
+.notice-error {
+    -fx-background-color: rgba(236,106,107,0.10);
+    -fx-border-color: -error;
+}
 .notice-demo {
     -fx-background-color: rgba(155,135,255,0.10);
     -fx-border-color: -accent-2;
