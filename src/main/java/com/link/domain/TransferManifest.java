@@ -20,7 +20,7 @@ public record TransferManifest(
                 throw new IllegalArgumentException("Manifest entry path cannot be null or empty.");
             }
             if (entry.relativePath().contains("..")) {
-                throw new IllegalArgumentException("Path traversal components (..) are strictly forbidden.[cite: 16]");
+                throw new IllegalArgumentException("Path traversal components (..) are strictly forbidden.");
             }
         }
     }
