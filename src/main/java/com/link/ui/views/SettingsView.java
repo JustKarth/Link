@@ -4,7 +4,7 @@ import com.link.ui.components.Icons;
 import com.link.ui.components.ToggleSwitch;
 import com.link.ui.demo.DemoDataFactory;
 import com.link.ui.demo.DemoDevice;
-import com.link.ui.prototype.PrototypeState;
+import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -28,7 +28,7 @@ import java.io.File;
  */
 public class SettingsView implements View {
 
-    private final PrototypeState state;
+    private final LinkViewModel state;
     private final VBox root = new VBox();
 
     private final TextField deviceName = new TextField();
@@ -40,7 +40,7 @@ public class SettingsView implements View {
     private final Label selfInfoLabel = new Label();
     private final Label versionLabel = new Label();
 
-    public SettingsView(PrototypeState state) {
+    public SettingsView(LinkViewModel state) {
         this.state = state;
         build();
         refresh();
@@ -83,11 +83,11 @@ public class SettingsView implements View {
         });
 
         VBox discovery = section("DISCOVERY",
-                row("Mock discovery",
-                        "Use simulated nearby devices instead of real network discovery.",
+                row("Discovery",
+                        "Scan for nearby devices on the local network.",
                         mockDiscovery),
                 row("Discoverable",
-                        "Let nearby devices see this device. (Demo only — no real broadcasting.)",
+                        "Let nearby devices see this device and send you files.",
                         discoverable));
 
         // ---- Transfers ----
@@ -118,7 +118,7 @@ public class SettingsView implements View {
                         "Where received files are saved.",
                         new HBox(10, downloadPath, browse)),
                 row("Approve incoming transfers",
-                        "Ask before accepting files sent to this device. (Demo only.)",
+                        "Ask before accepting files sent to this device.",
                         approval));
 
         // ---- Notifications ----
@@ -129,7 +129,7 @@ public class SettingsView implements View {
 
         VBox notif = section("NOTIFICATIONS",
                 row("Desktop notifications",
-                        "Notify on completed, failed and incoming transfers. (Demo only.)",
+                        "Notify on completed, failed and incoming transfers.",
                         notifications));
 
         VBox body = new VBox(18, general, discovery, transfers, notif);

@@ -10,7 +10,7 @@ import com.link.ui.demo.DeviceType;
 import com.link.ui.demo.DiscoveryState;
 import com.link.ui.demo.TransferDirection;
 import com.link.ui.demo.TransferStatus;
-import com.link.ui.prototype.PrototypeState;
+import com.link.ui.viewmodel.LinkViewModel;
 import javafx.animation.FadeTransition;
 import javafx.animation.PauseTransition;
 import javafx.geometry.Pos;
@@ -47,7 +47,7 @@ import java.util.List;
  */
 public class NearbyView implements View {
 
-    private final PrototypeState       state;
+    private final LinkViewModel       state;
     private final Navigator            nav;
     private final VBox                 root = new VBox();
     private final NetworkVisualization viz  = new NetworkVisualization();
@@ -72,7 +72,7 @@ public class NearbyView implements View {
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
-    public NearbyView(PrototypeState state, Navigator nav) {
+    public NearbyView(LinkViewModel state, Navigator nav) {
         this.state = state;
         this.nav   = nav;
         build();
@@ -188,11 +188,6 @@ public class NearbyView implements View {
         textCol.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(textCol, Priority.ALWAYS);
 
-        Label demoBadge = new Label("DEMO");
-        demoBadge.setStyle("-fx-font-size: 9; -fx-font-weight: 700; -fx-text-fill: #4facfe;"
-                + "-fx-background-color: rgba(79,172,254,0.14);"
-                + "-fx-background-radius: 5; -fx-padding: 2 7 2 7;");
-
         Button chooseBtn = new Button("Choose Files");
         chooseBtn.setStyle("-fx-background-color: #00f2fe; -fx-background-radius: 9;"
                 + "-fx-text-fill: #04141A; -fx-font-weight: 700; -fx-font-size: 12;"
@@ -206,7 +201,7 @@ public class NearbyView implements View {
         clearBtn.setOnAction(e -> state.clearSelection());
         clearBtn.setTooltip(new javafx.scene.control.Tooltip("Clear selection (Esc)"));
 
-        destPanel.getChildren().addAll(destIconBox, textCol, demoBadge, chooseBtn, clearBtn);
+        destPanel.getChildren().addAll(destIconBox, textCol, chooseBtn, clearBtn);
         destPanel.setPrefHeight(64);
     }
 
@@ -343,8 +338,7 @@ public class NearbyView implements View {
             destName.setText(sel.getName());
             destMeta.setText(typeName(sel.getType())
                     + " · " + (sel.getStatus() == DeviceStatus.ONLINE ? "Online" : "Away")
-                    + " · " + sel.getIpAddress()
-                    + " · Demo transfer");
+                    + " · " + sel.getIpAddress());
         }
 
         if (shouldShow && !destVisible) {

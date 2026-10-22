@@ -4,7 +4,7 @@ import com.link.ui.components.Icons;
 import com.link.ui.components.TransferCard;
 import com.link.ui.demo.DemoTransfer;
 import com.link.ui.demo.TransferStatus;
-import com.link.ui.prototype.PrototypeState;
+import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -31,7 +31,7 @@ import java.util.Map;
  */
 public class TransfersView implements View {
 
-    private final PrototypeState state;
+    private final LinkViewModel state;
     private final VBox root = new VBox();
     private final VBox list = new VBox(10);
     private final Button activeTab = new Button();
@@ -40,7 +40,7 @@ public class TransfersView implements View {
     private boolean showActive = true;
     private Timeline timeline;
 
-    public TransfersView(PrototypeState state) {
+    public TransfersView(LinkViewModel state) {
         this.state = state;
         build();
         refresh();
@@ -54,8 +54,8 @@ public class TransfersView implements View {
                 new StyledLabel(title(), "page-title"),
                 new StyledLabel(subtitle(), "page-subtitle"));
 
-        Label demoTag = new Label("Demo");
-        demoTag.getStyleClass().addAll("pill", "pill-demo");
+        Label demoTag = new Label("Live");
+        demoTag.getStyleClass().addAll("pill", "pill-completed");
         HBox header = new HBox(titleBox, spacer(), demoTag);
         header.getStyleClass().add("content-header");
         HBox.setHgrow(titleBox, Priority.ALWAYS);
@@ -171,7 +171,7 @@ public class TransfersView implements View {
     }
 
     @Override public String title() { return "Transfers"; }
-    @Override public String subtitle() { return "Track files moving between your devices. Demo data — no real transfers occur."; }
+    @Override public String subtitle() { return "Track files moving between your devices."; }
 
     public Pane root() { return root; }
 

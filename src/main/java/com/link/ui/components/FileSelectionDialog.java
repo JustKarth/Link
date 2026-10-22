@@ -2,7 +2,7 @@ package com.link.ui.components;
 
 import com.link.ui.demo.DemoDevice;
 import com.link.ui.demo.DemoTransfer;
-import com.link.ui.prototype.PrototypeState;
+import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
 import com.link.ui.util.FormatUtil;
 import javafx.scene.control.Button;
@@ -40,7 +40,7 @@ public class FileSelectionDialog {
     private enum Step { SELECT, REVIEW }
 
     private final StackPane root;
-    private final PrototypeState state;
+    private final LinkViewModel state;
     private final DemoDevice destination;
     private final Runnable onSent;
 
@@ -52,7 +52,7 @@ public class FileSelectionDialog {
     private final Set<String> paths = new HashSet<>();
     private Runnable refreshListRef;
 
-    public FileSelectionDialog(StackPane root, PrototypeState state, DemoDevice destination, Runnable onSent) {
+    public FileSelectionDialog(StackPane root, LinkViewModel state, DemoDevice destination, Runnable onSent) {
         this.root = root;
         this.state = state;
         this.destination = destination;
@@ -293,7 +293,6 @@ public class FileSelectionDialog {
 
     private void confirmSend() {
         List<DemoTransfer> created = state.addOutgoingTransfers(files, destination);
-        state.startPendingTransfers();
         close();
         if (onSent != null) onSent.run();
     }
