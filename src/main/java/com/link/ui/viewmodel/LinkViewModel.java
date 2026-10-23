@@ -655,14 +655,21 @@ public class LinkViewModel {
         String id = snapshot.transferId().toString();
         DemoTransfer existing = transfersById.get(id);
 
+        String fileName = snapshot.fileName() != null ? snapshot.fileName() : "Unknown file";
+        String ext = fileName.lastIndexOf('.') >= 0
+                ? fileName.substring(fileName.lastIndexOf('.') + 1)
+                : "";
+
         if (existing == null) {
             // Incoming transfer we haven't seen before — create a new record.
             String peerName = snapshot.peer() != null ? snapshot.peer().displayName() : "Unknown";
+            long totalBytes = snapshot.progress() != null ? snapshot.progress().totalBytes() : 0L;
+
             DemoTransfer dt = new DemoTransfer(
                     id,
-                    "Incoming transfer",   // real file name arrives in TRANSFER_REQUEST payload
-                    0L,
-                    "",
+                    fileName,
+                    totalBytes,
+                    ext,
                     mapDirection(snapshot.direction()),
                     peerName,
                     mapState(snapshot.state()),
@@ -878,4 +885,3 @@ public class LinkViewModel {
         fireChange();
     }
 }
-

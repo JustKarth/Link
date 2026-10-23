@@ -44,7 +44,26 @@ public class DefaultSecureSession implements SecureSession {
             throw new RuntimeException("Failed to receive message", e);
         }
     }
-    
+
+    @Override
+    public void sendData(byte[] data) {
+        try {
+            frameCodec.writeFrame(out, data);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to send data", e);
+        }
+    }
+
+    @Override
+    public byte[] receiveData() {
+        try {
+            return frameCodec.readFrame(in);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to receive data", e);
+        }
+    }
+
+    @Override
     public void close() {
         try {
             socket.close();

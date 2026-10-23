@@ -5,14 +5,21 @@ import com.link.domain.Peer;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.function.Consumer;
 
 public class DefaultConnectionManager implements ConnectionManager {
 
     private final int port;
     private ServerSocket serverSocket;
+    private Consumer<SecureSession> incomingSessionHandler;
 
     public DefaultConnectionManager(int port) {
         this.port = port;
+    }
+
+    @Override
+    public void setIncomingSessionHandler(Consumer<SecureSession> handler) {
+        this.incomingSessionHandler = handler;
     }
 
     @Override
@@ -23,12 +30,18 @@ public class DefaultConnectionManager implements ConnectionManager {
                 while (!serverSocket.isClosed()) {
                     Socket clientSocket = serverSocket.accept();
                     SecureSession session = new DefaultSecureSession(clientSocket);
-                    // Pass session to coordinator
+                    
+                    if (incomingSessionHandler != null) {
+                        incomingSessionHandler.accept(session);
+                    }
                 }
             } catch (IOException e) {
-                // Handle listen failure
+                // Handle listen failure gracefully if closed intentionally
+                if (serverSocket != null && !serverSocket.isClosed()) {
+                    e.printStackTrace();
+                }
             }
-        }).start();
+        }, "TCP-Listener-Thread").start();
     }
 
     @Override
