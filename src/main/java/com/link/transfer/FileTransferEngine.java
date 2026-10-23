@@ -25,6 +25,8 @@ import java.util.concurrent.Executors;
 
 public class FileTransferEngine {
 
+    private final String localPeerId;
+    private final String localDisplayName;
     private final DiscoveryService discoveryService;
     private final ConnectionManager connectionManager;
     private final TransferObserver observer;
@@ -34,10 +36,25 @@ public class FileTransferEngine {
     private final Map<UUID, SecureSession> activeSessions = new ConcurrentHashMap<>();
     private final Map<UUID, IncomingFileState> incomingFiles = new ConcurrentHashMap<>();
 
-    public record ControlMessage(String type, String transferId, String fileName, long fileSize) {}
+    public record ControlMessage(
+        String type, 
+        String transferId, 
+        String fileName, 
+        long fileSize,
+        String senderId,
+        String senderDisplayName
+    ) {}
+    
     private record IncomingFileState(String fileName, long fileSize, Peer peer) {}
 
-    public FileTransferEngine(DiscoveryService discoveryService, ConnectionManager connectionManager, TransferObserver observer) {
+    public FileTransferEngine(
+            String localPeerId,
+            String localDisplayName,
+            DiscoveryService discoveryService, 
+            ConnectionManager connectionManager, 
+            TransferObserver observer) {
+        this.localPeerId = localPeerId;
+        this.localDisplayName = localDisplayName;
         this.discoveryService = discoveryService;
         this.connectionManager = connectionManager;
         this.observer = observer;
@@ -59,7 +76,15 @@ public class FileTransferEngine {
                 SecureSession session = connectionManager.connect(targetPeer);
                 activeSessions.put(transferId, session);
                 
-                ControlMessage request = new ControlMessage("TRANSFER_REQUEST", transferId.toString(), fileName, totalBytes);
+                // Include local sender metadata in the request
+                ControlMessage request = new ControlMessage(
+                    "TRANSFER_REQUEST", 
+                    transferId.toString(), 
+                    fileName, 
+                    totalBytes,
+                    localPeerId,
+                    localDisplayName
+                );
                 session.sendMessage(mapper.writeValueAsString(request));
 
                 String responseJson = session.receiveMessage();
@@ -90,7 +115,7 @@ public class FileTransferEngine {
                             notifyUI(transferId, fileName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBytes, completedBytes, speed), null);
                         }
                     }
-                    ControlMessage complete = new ControlMessage("TRANSFER_COMPLETED", transferId.toString(), null, 0);
+                    ControlMessage complete = new ControlMessage("TRANSFER_COMPLETED", transferId.toString(), null, 0, null, null);
                     session.sendMessage(mapper.writeValueAsString(complete));
                     
                     notifyUI(transferId, fileName, TransferDirection.SENDING, targetPeer, TransferState.COMPLETED, new TransferProgress(totalBytes, totalBytes, 0), null);
@@ -116,9 +141,18 @@ public class FileTransferEngine {
                 if ("TRANSFER_REQUEST".equals(request.type())) {
                     UUID transferId = UUID.fromString(request.transferId());
                     activeSessions.put(transferId, session);
-                    incomingFiles.put(transferId, new IncomingFileState(request.fileName(), request.fileSize(), null));
                     
-                    notifyUI(transferId, request.fileName(), TransferDirection.RECEIVING, null, TransferState.OFFERED, new TransferProgress(request.fileSize(), 0, 0), null);
+                    // Reconstruct sender Peer metadata from the incoming request payload
+                    Peer senderPeer = new Peer(
+                        new PeerId(request.senderId() != null ? request.senderId() : "unknown-id"),
+                        request.senderDisplayName() != null ? request.senderDisplayName() : "Unknown",
+                        "",
+                        false
+                    );
+
+                    incomingFiles.put(transferId, new IncomingFileState(request.fileName(), request.fileSize(), senderPeer));
+                    
+                    notifyUI(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.OFFERED, new TransferProgress(request.fileSize(), 0, 0), null);
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -134,7 +168,7 @@ public class FileTransferEngine {
             if (session == null || fileState == null) return;
 
             try {
-                ControlMessage acceptMsg = new ControlMessage("TRANSFER_ACCEPTED", transferId.toString(), null, 0);
+                ControlMessage acceptMsg = new ControlMessage("TRANSFER_ACCEPTED", transferId.toString(), null, 0, null, null);
                 session.sendMessage(mapper.writeValueAsString(acceptMsg));
 
                 notifyUI(transferId, fileState.fileName(), TransferDirection.RECEIVING, fileState.peer(), TransferState.TRANSFERRING, new TransferProgress(fileState.fileSize(), 0, 0), null);
@@ -178,12 +212,13 @@ public class FileTransferEngine {
             SecureSession session = activeSessions.get(transferId);
             IncomingFileState fileState = incomingFiles.get(transferId);
             String fileName = fileState != null ? fileState.fileName() : "Unknown";
+            Peer peer = fileState != null ? fileState.peer() : null;
 
             if (session != null) {
                 try {
-                    ControlMessage rejectMsg = new ControlMessage("TRANSFER_REJECTED", transferId.toString(), null, 0);
+                    ControlMessage rejectMsg = new ControlMessage("TRANSFER_REJECTED", transferId.toString(), null, 0, null, null);
                     session.sendMessage(mapper.writeValueAsString(rejectMsg));
-                    notifyUI(transferId, fileName, TransferDirection.RECEIVING, null, TransferState.CANCELLED, null, "Transfer rejected by local user");
+                    notifyUI(transferId, fileName, TransferDirection.RECEIVING, peer, TransferState.CANCELLED, null, "Transfer rejected by local user");
                 } catch (Exception e) {
                     e.printStackTrace();
                 } finally {
@@ -197,10 +232,11 @@ public class FileTransferEngine {
     public void cancelTransfer(UUID transferId) {
         IncomingFileState fileState = incomingFiles.get(transferId);
         String fileName = fileState != null ? fileState.fileName() : "Unknown";
+        Peer peer = fileState != null ? fileState.peer() : null;
 
         closeSession(transferId);
         incomingFiles.remove(transferId);
-        notifyUI(transferId, fileName, TransferDirection.SENDING, null, TransferState.CANCELLED, null, "Transfer cancelled");
+        notifyUI(transferId, fileName, TransferDirection.SENDING, peer, TransferState.CANCELLED, null, "Transfer cancelled");
     }
 
     private void closeSession(UUID transferId) {

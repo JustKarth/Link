@@ -42,7 +42,13 @@ public class LinkEngine {
 
         // 3. File Transfer Engine
         // The engine directly handles chunked byte streams for network efficiency
-        this.fileTransferEngine = new FileTransferEngine(this.discoveryService, this.connectionManager, observer);
+        this.fileTransferEngine = new FileTransferEngine(
+          this.localPeerId,
+            this.localDisplayName,
+            this.discoveryService, 
+            this.connectionManager, 
+            observer
+        );
 
         // Route incoming TCP connections to the Transfer Engine
         this.connectionManager.setIncomingSessionHandler(this.fileTransferEngine::handleIncomingSession);
