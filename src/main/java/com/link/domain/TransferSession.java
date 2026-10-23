@@ -4,6 +4,7 @@ import java.util.UUID;
 
 public record TransferSession(
     UUID transferId,
+    String fileName,
     TransferDirection direction,
     Peer peer,
     TransferState state,

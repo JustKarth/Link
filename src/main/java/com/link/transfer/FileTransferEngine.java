@@ -1,50 +1,217 @@
 package com.link.transfer;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.link.application.DiscoveryService;
+import com.link.application.TransferObserver;
+import com.link.domain.Peer;
+import com.link.domain.PeerId;
+import com.link.domain.TransferDirection;
+import com.link.domain.TransferProgress;
+import com.link.domain.TransferSession;
+import com.link.domain.TransferState;
+import com.link.networking.ConnectionManager;
+import com.link.networking.SecureSession;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class FileTransferEngine {
 
-    private static final int CHUNK_SIZE = 8192 * 4; //KiB
+    private final DiscoveryService discoveryService;
+    private final ConnectionManager connectionManager;
+    private final TransferObserver observer;
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final ExecutorService transferPool = Executors.newCachedThreadPool();
+    
+    private final Map<UUID, SecureSession> activeSessions = new ConcurrentHashMap<>();
+    private final Map<UUID, IncomingFileState> incomingFiles = new ConcurrentHashMap<>();
 
-    /**
-     * Streams bytes from the source to the destination in bounded chunks.
-     *
-     * @param source         The input stream (file for sending, network for receiving).
-     * @param destination    The output stream (network for sending, file for receiving).
-     * @param expectedSize   The total expected size for progress calculations.
-     * @param isCancelled    A supplier that returns true if the transfer should abort.
-     * @param progressCb     Callback to report bytes transferred.
-     * @throws IOException   If a stream read/write fails.
-     */
-    public void streamChunks(
-            InputStream source, 
-            OutputStream destination, 
-            long expectedSize, 
-            Supplier<Boolean> isCancelled, 
-            Consumer<Long> progressCb) throws IOException {
-        
-        byte[] buffer = new byte[CHUNK_SIZE];
-        int bytesRead;
-        long totalBytesTransferred = 0;
+    public record ControlMessage(String type, String transferId, String fileName, long fileSize) {}
+    private record IncomingFileState(String fileName, long fileSize, Peer peer) {}
 
-        while ((bytesRead = source.read(buffer)) != -1) {
-            if (isCancelled.get()) {
-                throw new IOException("Transfer cancelled by user or coordinator.[cite: 19]");
+    public FileTransferEngine(DiscoveryService discoveryService, ConnectionManager connectionManager, TransferObserver observer) {
+        this.discoveryService = discoveryService;
+        this.connectionManager = connectionManager;
+        this.observer = observer;
+    }
+
+    public void initiateTransfer(UUID transferId, PeerId peerId, List<Path> sourcePaths) {
+        transferPool.submit(() -> {
+            Peer targetPeer = null;
+            File file = sourcePaths.get(0).toFile();
+            String fileName = file.getName();
+            long totalBytes = file.length();
+
+            try {
+                targetPeer = discoveryService.getDiscoveredPeers().stream()
+                        .filter(p -> p.id().equals(peerId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Peer not found"));
+
+                SecureSession session = connectionManager.connect(targetPeer);
+                activeSessions.put(transferId, session);
+                
+                ControlMessage request = new ControlMessage("TRANSFER_REQUEST", transferId.toString(), fileName, totalBytes);
+                session.sendMessage(mapper.writeValueAsString(request));
+
+                String responseJson = session.receiveMessage();
+                ControlMessage response = mapper.readValue(responseJson, ControlMessage.class);
+
+                if ("TRANSFER_ACCEPTED".equals(response.type())) {
+                    notifyUI(transferId, fileName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBytes, 0, 0), null);
+
+                    long completedBytes = 0;
+                    long startTime = System.currentTimeMillis();
+
+                    try (FileInputStream fis = new FileInputStream(file)) {
+                        byte[] buffer = new byte[8192];
+                        int read;
+                        while ((read = fis.read(buffer)) > 0) {
+                            if (read == buffer.length) {
+                                session.sendData(buffer);
+                            } else {
+                                byte[] exactChunk = new byte[read];
+                                System.arraycopy(buffer, 0, exactChunk, 0, read);
+                                session.sendData(exactChunk);
+                            }
+                            
+                            completedBytes += read;
+                            long elapsedMs = System.currentTimeMillis() - startTime;
+                            long speed = elapsedMs > 0 ? (completedBytes * 1000L) / elapsedMs : 0;
+                            
+                            notifyUI(transferId, fileName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBytes, completedBytes, speed), null);
+                        }
+                    }
+                    ControlMessage complete = new ControlMessage("TRANSFER_COMPLETED", transferId.toString(), null, 0);
+                    session.sendMessage(mapper.writeValueAsString(complete));
+                    
+                    notifyUI(transferId, fileName, TransferDirection.SENDING, targetPeer, TransferState.COMPLETED, new TransferProgress(totalBytes, totalBytes, 0), null);
+                } else if ("TRANSFER_REJECTED".equals(response.type())) {
+                    notifyUI(transferId, fileName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(totalBytes, 0, 0), "Peer rejected transfer");
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                notifyUI(transferId, fileName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
+            } finally {
+                closeSession(transferId);
             }
+        });
+    }
 
-            destination.write(buffer, 0, bytesRead);
-            totalBytesTransferred += bytesRead;
+    public void handleIncomingSession(SecureSession session) {
+        transferPool.submit(() -> {
+            try {
+                String requestJson = session.receiveMessage();
+                ControlMessage request = mapper.readValue(requestJson, ControlMessage.class);
 
-            if (progressCb != null) {
-                progressCb.accept(totalBytesTransferred);
+                if ("TRANSFER_REQUEST".equals(request.type())) {
+                    UUID transferId = UUID.fromString(request.transferId());
+                    activeSessions.put(transferId, session);
+                    incomingFiles.put(transferId, new IncomingFileState(request.fileName(), request.fileSize(), null));
+                    
+                    notifyUI(transferId, request.fileName(), TransferDirection.RECEIVING, null, TransferState.OFFERED, new TransferProgress(request.fileSize(), 0, 0), null);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                session.close();
             }
+        });
+    }
+
+    public void acceptTransfer(UUID transferId, Path destinationDirectory) {
+        transferPool.submit(() -> {
+            SecureSession session = activeSessions.get(transferId);
+            IncomingFileState fileState = incomingFiles.get(transferId);
+            if (session == null || fileState == null) return;
+
+            try {
+                ControlMessage acceptMsg = new ControlMessage("TRANSFER_ACCEPTED", transferId.toString(), null, 0);
+                session.sendMessage(mapper.writeValueAsString(acceptMsg));
+
+                notifyUI(transferId, fileState.fileName(), TransferDirection.RECEIVING, fileState.peer(), TransferState.TRANSFERRING, new TransferProgress(fileState.fileSize(), 0, 0), null);
+
+                File destFile = destinationDirectory.resolve(fileState.fileName()).toFile();
+                long startTime = System.currentTimeMillis();
+
+                try (FileOutputStream fos = new FileOutputStream(destFile)) {
+                    long totalReceived = 0;
+                    while (totalReceived < fileState.fileSize()) {
+                        byte[] chunk = session.receiveData();
+                        
+                        if (chunk.length > 0 && chunk[0] == '{') {
+                            String maybeJson = new String(chunk);
+                            if (maybeJson.contains("TRANSFER_COMPLETED")) break;
+                        }
+                        
+                        fos.write(chunk);
+                        totalReceived += chunk.length;
+
+                        long elapsedMs = System.currentTimeMillis() - startTime;
+                        long speed = elapsedMs > 0 ? (totalReceived * 1000L) / elapsedMs : 0;
+
+                        notifyUI(transferId, fileState.fileName(), TransferDirection.RECEIVING, fileState.peer(), TransferState.TRANSFERRING, new TransferProgress(fileState.fileSize(), totalReceived, speed), null);
+                    }
+                }
+                
+                notifyUI(transferId, fileState.fileName(), TransferDirection.RECEIVING, fileState.peer(), TransferState.COMPLETED, new TransferProgress(fileState.fileSize(), fileState.fileSize(), 0), null);
+            } catch (Exception e) {
+                e.printStackTrace();
+                notifyUI(transferId, fileState.fileName(), TransferDirection.RECEIVING, fileState.peer(), TransferState.FAILED, new TransferProgress(fileState.fileSize(), 0, 0), e.getMessage());
+            } finally {
+                closeSession(transferId);
+                incomingFiles.remove(transferId);
+            }
+        });
+    }
+
+    public void rejectTransfer(UUID transferId) {
+        transferPool.submit(() -> {
+            SecureSession session = activeSessions.get(transferId);
+            IncomingFileState fileState = incomingFiles.get(transferId);
+            String fileName = fileState != null ? fileState.fileName() : "Unknown";
+
+            if (session != null) {
+                try {
+                    ControlMessage rejectMsg = new ControlMessage("TRANSFER_REJECTED", transferId.toString(), null, 0);
+                    session.sendMessage(mapper.writeValueAsString(rejectMsg));
+                    notifyUI(transferId, fileName, TransferDirection.RECEIVING, null, TransferState.CANCELLED, null, "Transfer rejected by local user");
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    closeSession(transferId);
+                    incomingFiles.remove(transferId);
+                }
+            }
+        });
+    }
+
+    public void cancelTransfer(UUID transferId) {
+        IncomingFileState fileState = incomingFiles.get(transferId);
+        String fileName = fileState != null ? fileState.fileName() : "Unknown";
+
+        closeSession(transferId);
+        incomingFiles.remove(transferId);
+        notifyUI(transferId, fileName, TransferDirection.SENDING, null, TransferState.CANCELLED, null, "Transfer cancelled");
+    }
+
+    private void closeSession(UUID transferId) {
+        SecureSession session = activeSessions.remove(transferId);
+        if (session != null) {
+            session.close();
         }
-        
-        destination.flush();
+    }
+
+    private void notifyUI(UUID transferId, String fileName, TransferDirection direction, Peer peer, TransferState state, TransferProgress progress, String failureReason) {
+        TransferSession snapshot = new TransferSession(transferId, fileName, direction, peer, state, progress, failureReason);
+        observer.onTransferUpdated(snapshot);
     }
 }

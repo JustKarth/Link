@@ -5,8 +5,6 @@ import com.link.application.DiscoveryService;
 import com.link.application.TransferCoordinator;
 import com.link.application.TransferObserver;
 import com.link.discovery.UdpDiscoveryService;
-import com.link.filesystem.FileStorageService;
-import com.link.filesystem.IntegrityService;
 import com.link.networking.ConnectionManager;
 import com.link.networking.DefaultConnectionManager;
 import com.link.persistence.DatabaseManager;
@@ -15,9 +13,6 @@ import com.link.transfer.FileTransferEngine;
 
 import java.util.UUID;
 
-/**
- * Main backend application manager that initializes and wires core services.
- */
 public class LinkEngine {
 
     private final String localPeerId;
@@ -29,6 +24,7 @@ public class LinkEngine {
     private final DiscoveryService discoveryService;
     private final ConnectionManager connectionManager;
     private final TransferCoordinator transferCoordinator;
+    private final FileTransferEngine fileTransferEngine;
 
     public LinkEngine(String localDisplayName, int port, TransferObserver observer) {
         this.localPeerId = UUID.randomUUID().toString();
@@ -40,20 +36,21 @@ public class LinkEngine {
         this.dbManager.initializeDatabase();
         this.transferRepository = new TransferRepository(dbManager);
 
-        // 2. Core Filesystem and Engine Primitives
-        FileStorageService storageService = new FileStorageService();
-        IntegrityService integrityService = new IntegrityService();
-        FileTransferEngine transferEngine = new FileTransferEngine();
-
-        // 3. Application and Network Services
-        this.discoveryService = new UdpDiscoveryService(localPeerId, localDisplayName, port);
+        // 2. Network Connections & Discovery
         this.connectionManager = new DefaultConnectionManager(port);
+        this.discoveryService = new UdpDiscoveryService(localPeerId, localDisplayName, port);
+
+        // 3. File Transfer Engine
+        // The engine directly handles chunked byte streams for network efficiency
+        this.fileTransferEngine = new FileTransferEngine(this.discoveryService, this.connectionManager, observer);
+
+        // Route incoming TCP connections to the Transfer Engine
+        this.connectionManager.setIncomingSessionHandler(this.fileTransferEngine::handleIncomingSession);
+
+        // 4. Transfer Coordinator (Updated to match the new 2-argument constructor)
         this.transferCoordinator = new DefaultTransferCoordinator(
-                storageService,
-                integrityService,
-                transferEngine,
-                observer,
-                transferRepository
+                this.fileTransferEngine,
+                this.transferRepository
         );
     }
 
@@ -77,5 +74,18 @@ public class LinkEngine {
 
     public TransferRepository getTransferRepository() {
         return transferRepository;
+    }
+
+    // Added getters to resolve the "unused field" highlights
+    public String getLocalPeerId() {
+        return localPeerId;
+    }
+
+    public String getLocalDisplayName() {
+        return localDisplayName;
+    }
+
+    public int getPort() {
+        return port;
     }
 }
