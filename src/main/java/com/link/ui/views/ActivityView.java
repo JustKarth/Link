@@ -3,7 +3,7 @@ package com.link.ui.views;
 import com.link.ui.components.Icons;
 import com.link.ui.demo.DemoActivity;
 import com.link.ui.demo.TransferDirection;
-import com.link.ui.prototype.PrototypeState;
+import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
 import com.link.ui.util.FormatUtil;
 import javafx.scene.control.Button;
@@ -29,14 +29,14 @@ public class ActivityView implements View {
 
     private enum Filter { ALL, SENT, RECEIVED, COMPLETED, FAILED }
 
-    private final PrototypeState state;
+    private final LinkViewModel state;
     private final VBox root = new VBox();
     private final VBox list = new VBox(8);
     private final TextField search = new TextField();
     private Filter filter = Filter.ALL;
     private final List<Button> chipButtons = new ArrayList<>();
 
-    public ActivityView(PrototypeState state) {
+    public ActivityView(LinkViewModel state) {
         this.state = state;
         build();
         refresh();

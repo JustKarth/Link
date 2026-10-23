@@ -1,10 +1,8 @@
 package com.link.ui.views;
 
 import com.link.ui.components.Icons;
-import com.link.ui.demo.DemoActivity;
-import com.link.ui.demo.DemoDataFactory;
 import com.link.ui.demo.DiscoveryState;
-import com.link.ui.prototype.PrototypeState;
+import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
@@ -26,7 +24,7 @@ import java.util.Map;
  */
 public class MainShell implements Navigator {
 
-    private final PrototypeState state;
+    private final LinkViewModel state;
     private final StackPane root = new StackPane();
     private final BorderPane shell = new BorderPane();
     private final StackPane contentHost = new StackPane();
@@ -39,7 +37,7 @@ public class MainShell implements Navigator {
     private final Label footerStatus = new Label();
     private final Region footerDot = new Region();
 
-    public MainShell(PrototypeState state) {
+    public MainShell(LinkViewModel state) {
         this.state = state;
         views.put(ViewKey.NEARBY, new NearbyView(state, this));
         views.put(ViewKey.TRANSFERS, new TransfersView(state));

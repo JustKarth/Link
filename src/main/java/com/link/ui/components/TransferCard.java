@@ -3,7 +3,7 @@ package com.link.ui.components;
 import com.link.ui.demo.DemoTransfer;
 import com.link.ui.demo.TransferDirection;
 import com.link.ui.demo.TransferStatus;
-import com.link.ui.prototype.PrototypeState;
+import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
 import com.link.ui.util.FormatUtil;
 import javafx.beans.property.DoubleProperty;
@@ -24,14 +24,13 @@ import javafx.scene.layout.VBox;
  */
 public class TransferCard extends VBox {
 
-    private final PrototypeState state;
+    private final LinkViewModel state;
     private final String transferId;
 
     private final Region fill = new Region();
     private final DoubleProperty progressProp = new SimpleDoubleProperty(0);
     private final Label percent = new Label();
     private final Label pace = new Label();
-    private final Label demoPill = new Label("demo");
     private final Label pill = new Label();
     private final Label dirBadge = new Label();
     private final Label name = new Label();
@@ -40,7 +39,7 @@ public class TransferCard extends VBox {
     private final HBox paceRow = new HBox(8);
     private final StackPane iconWrap = new StackPane();
 
-    public TransferCard(DemoTransfer t, PrototypeState state) {
+    public TransferCard(DemoTransfer t, LinkViewModel state) {
         this.state = state;
         this.transferId = t.getId();
         getStyleClass().addAll("card", "transfer-card");
@@ -77,11 +76,8 @@ public class TransferCard extends VBox {
                 javafx.beans.binding.Bindings.multiply(track.widthProperty(), progressProp));
 
         percent.getStyleClass().add("tiny");
-        demoPill.getStyleClass().add("pill");
-        demoPill.getStyleClass().add("pill-demo");
-        demoPill.setVisible(false);
         pace.getStyleClass().add("tiny");
-        paceRow.getChildren().addAll(track, spacer, percent, pace, demoPill);
+        paceRow.getChildren().addAll(track, spacer, percent, pace);
         HBox.setHgrow(track, Priority.ALWAYS);
 
         controls.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
@@ -138,16 +134,13 @@ public class TransferCard extends VBox {
             long etaSec = speed > 0 ? remainingBytes / speed : 0;
             pace.setText(FormatUtil.formatSpeed(speed) + " · " + FormatUtil.formatEta(etaSec));
             pace.setVisible(true);
-            demoPill.setVisible(true);
             percent.setVisible(true);
         } else if (t.getStatus() == TransferStatus.PAUSED || t.getStatus() == TransferStatus.PENDING) {
             pace.setText(t.getStatus() == TransferStatus.PAUSED ? "Paused" : "Waiting…");
             pace.setVisible(true);
-            demoPill.setVisible(false);
             percent.setVisible(t.getProgress() > 0);
         } else {
             pace.setVisible(false);
-            demoPill.setVisible(false);
             percent.setVisible(false);
         }
 
