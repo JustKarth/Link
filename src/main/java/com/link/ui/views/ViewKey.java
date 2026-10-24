@@ -1,10 +1,11 @@
 package com.link.ui.views;
 
-/** The four navigable screens of the prototype. */
+/** The five navigable screens of the application. */
 public enum ViewKey {
     NEARBY("Nearby"),
     TRANSFERS("Transfers"),
     ACTIVITY("Activity"),
+    DEVICES("Devices"),
     SETTINGS("Settings");
 
     private final String label;

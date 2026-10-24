@@ -35,16 +35,27 @@ public final class Modal {
         in.play();
     }
 
-    public void close() {
-        if (backdrop == null) return;
-        FadeTransition out = new FadeTransition(Duration.millis(120), backdrop);
-        out.setToValue(0);
-        out.setOnFinished(e -> root.getChildren().remove(backdrop));
-        out.play();
-        backdrop.setOnMousePressed(null);
-        backdrop = null;
-        if (onClose != null) onClose.run();
-    }
+    
+public void close() {
+    if (backdrop == null) return;
+
+    StackPane closingBackdrop = backdrop;
+
+    FadeTransition out =
+            new FadeTransition(Duration.millis(120), closingBackdrop);
+
+    out.setToValue(0);
+    out.setOnFinished(e ->
+            root.getChildren().remove(closingBackdrop));
+
+    out.play();
+
+    closingBackdrop.setOnMousePressed(null);
+    backdrop = null;
+
+    if (onClose != null) onClose.run();
+}
+
 
     public void setOnClose(Runnable r) { this.onClose = r; }
 

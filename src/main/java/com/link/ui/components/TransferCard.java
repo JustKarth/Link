@@ -136,7 +136,13 @@ public class TransferCard extends VBox {
             pace.setVisible(true);
             percent.setVisible(true);
         } else if (t.getStatus() == TransferStatus.PAUSED || t.getStatus() == TransferStatus.PENDING) {
-            pace.setText(t.getStatus() == TransferStatus.PAUSED ? "Paused" : "Waiting…");
+            if (t.getStatus() == TransferStatus.PAUSED) {
+                pace.setText("Paused");
+            } else if (t.getDirection() == TransferDirection.INCOMING) {
+                pace.setText("Awaiting your decision");
+            } else {
+                pace.setText("Waiting…");
+            }
             pace.setVisible(true);
             percent.setVisible(t.getProgress() > 0);
         } else {
@@ -154,8 +160,33 @@ public class TransferCard extends VBox {
             case PAUSED -> { controls.getChildren().addAll(iconBtn(Icons.play(15, Theme.TEXT_2),
                     () -> state.resumeTransfer(transferId)), iconBtn(Icons.cancel(15, Theme.TEXT_2),
                     () -> state.cancelTransfer(transferId))); showControls = true; }
-            case PENDING -> { controls.getChildren().add(iconBtn(Icons.cancel(15, Theme.TEXT_2),
-                    () -> state.cancelTransfer(transferId))); showControls = true; }
+            case PENDING -> {
+                    if (t.getDirection() == TransferDirection.INCOMING) {
+                        Button accept = new Button("Accept");
+                        Button reject = new Button("Reject");
+
+                        accept.getStyleClass().addAll("btn", "btn-accept");
+                        reject.getStyleClass().addAll("btn", "btn-reject");
+
+                        accept.setOnAction(e -> {
+                            accept.setDisable(true);
+                            reject.setDisable(true);
+                            state.acceptTransfer(transferId);
+                        });
+                        reject.setOnAction(e -> {
+                            accept.setDisable(true);
+                            reject.setDisable(true);
+                            state.rejectTransfer(transferId);
+                        });
+
+                        controls.getChildren().addAll(accept, reject);
+                    } else {
+                        controls.getChildren().add(iconBtn(
+                                Icons.cancel(15, Theme.TEXT_2),
+                                () -> state.cancelTransfer(transferId)));
+                    }
+                    showControls = true;
+                }
             case FAILED, CANCELLED -> { controls.getChildren().add(textBtn("Retry",
                     () -> state.retryTransfer(transferId))); showControls = true; }
             default -> { /* COMPLETED: no controls */ }

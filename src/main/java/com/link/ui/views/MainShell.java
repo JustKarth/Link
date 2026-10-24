@@ -42,6 +42,7 @@ public class MainShell implements Navigator {
         views.put(ViewKey.NEARBY, new NearbyView(state, this));
         views.put(ViewKey.TRANSFERS, new TransfersView(state));
         views.put(ViewKey.ACTIVITY, new ActivityView(state));
+        views.put(ViewKey.DEVICES, new DevicesView(state));
         views.put(ViewKey.SETTINGS, new SettingsView(state));
 
         shell.setLeft(buildSidebar());
@@ -82,6 +83,7 @@ public class MainShell implements Navigator {
         if (view instanceof NearbyView n) return n.root();
         if (view instanceof TransfersView t) return t.root();
         if (view instanceof ActivityView a) return a.root();
+        if (view instanceof DevicesView d) return d.root();
         if (view instanceof SettingsView s) return s.root();
         return new Label(view.title());
     }
@@ -113,6 +115,7 @@ public class MainShell implements Navigator {
         navItems.put(ViewKey.NEARBY, navItem(ViewKey.NEARBY, Icons.nearby(19, Theme.TEXT_2)));
         navItems.put(ViewKey.TRANSFERS, navItem(ViewKey.TRANSFERS, Icons.transfers(19, Theme.TEXT_2)));
         navItems.put(ViewKey.ACTIVITY, navItem(ViewKey.ACTIVITY, Icons.activity(19, Theme.TEXT_2)));
+        navItems.put(ViewKey.DEVICES, navItem(ViewKey.DEVICES, Icons.devices(19, Theme.TEXT_2)));
         navItems.put(ViewKey.SETTINGS, navItem(ViewKey.SETTINGS, Icons.settings(19, Theme.TEXT_2)));
         nav.getChildren().addAll(navItems.values());
 
