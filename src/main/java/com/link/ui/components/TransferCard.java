@@ -37,6 +37,8 @@ public class TransferCard extends VBox {
     private final Label meta = new Label();
     private final HBox controls = new HBox(8);
     private final HBox paceRow = new HBox(8);
+    private TransferStatus controlsStatus;
+    private TransferDirection controlsDirection;
     private final StackPane iconWrap = new StackPane();
 
     public TransferCard(DemoTransfer t, LinkViewModel state) {
@@ -150,17 +152,35 @@ public class TransferCard extends VBox {
             percent.setVisible(false);
         }
 
-        // Controls (demo only)
-        controls.getChildren().clear();
-        boolean showControls = false;
-        switch (t.getStatus()) {
-            case IN_PROGRESS -> { controls.getChildren().addAll(iconBtn(Icons.pause(15, Theme.TEXT_2),
-                    () -> state.pauseTransfer(transferId)), iconBtn(Icons.cancel(15, Theme.TEXT_2),
-                    () -> state.cancelTransfer(transferId))); showControls = true; }
-            case PAUSED -> { controls.getChildren().addAll(iconBtn(Icons.play(15, Theme.TEXT_2),
-                    () -> state.resumeTransfer(transferId)), iconBtn(Icons.cancel(15, Theme.TEXT_2),
-                    () -> state.cancelTransfer(transferId))); showControls = true; }
-            case PENDING -> {
+        // Rebuild controls only when the transfer state actually changes.
+        // The TransfersView refreshes every 120 ms, so rebuilding on every
+        // refresh would constantly replace the buttons while the user clicks.
+        if (t.getStatus() != controlsStatus
+                || t.getDirection() != controlsDirection) {
+
+            controls.getChildren().clear();
+            boolean showControls = false;
+
+            switch (t.getStatus()) {
+                case IN_PROGRESS -> {
+                    controls.getChildren().addAll(
+                            iconBtn(Icons.pause(15, Theme.TEXT_2),
+                                    () -> state.pauseTransfer(transferId)),
+                            iconBtn(Icons.cancel(15, Theme.TEXT_2),
+                                    () -> state.cancelTransfer(transferId))
+                    );
+                    showControls = true;
+                }
+                case PAUSED -> {
+                    controls.getChildren().addAll(
+                            iconBtn(Icons.play(15, Theme.TEXT_2),
+                                    () -> state.resumeTransfer(transferId)),
+                            iconBtn(Icons.cancel(15, Theme.TEXT_2),
+                                    () -> state.cancelTransfer(transferId))
+                    );
+                    showControls = true;
+                }
+                case PENDING -> {
                     if (t.getDirection() == TransferDirection.INCOMING) {
                         Button accept = new Button("Accept");
                         Button reject = new Button("Reject");
@@ -173,6 +193,7 @@ public class TransferCard extends VBox {
                             reject.setDisable(true);
                             state.acceptTransfer(transferId);
                         });
+
                         reject.setOnAction(e -> {
                             accept.setDisable(true);
                             reject.setDisable(true);
@@ -183,17 +204,28 @@ public class TransferCard extends VBox {
                     } else {
                         controls.getChildren().add(iconBtn(
                                 Icons.cancel(15, Theme.TEXT_2),
-                                () -> state.cancelTransfer(transferId)));
+                                () -> state.cancelTransfer(transferId)
+                        ));
                     }
                     showControls = true;
                 }
-            case FAILED, CANCELLED -> { controls.getChildren().add(textBtn("Retry",
-                    () -> state.retryTransfer(transferId))); showControls = true; }
-            default -> { /* COMPLETED: no controls */ }
-        }
-        controls.setManaged(showControls);
-        controls.setVisible(showControls);
-    }
+                case FAILED, CANCELLED -> {
+                    controls.getChildren().add(textBtn(
+                            "Retry", () -> state.retryTransfer(transferId)
+                    ));
+                    showControls = true;
+                }
+                default -> {
+                    // COMPLETED: no controls
+                }
+            }
+
+            controls.setManaged(showControls);
+            controls.setVisible(showControls);
+
+            controlsStatus = t.getStatus();
+            controlsDirection = t.getDirection();
+    }}
 
     private Button iconBtn(javafx.scene.Node glyph, Runnable action) {
         Button b = new Button();
