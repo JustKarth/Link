@@ -484,11 +484,15 @@ public class LinkViewModel {
      * @param transferId String representation of the transfer UUID
      */
     public void acceptTransfer(String transferId) {
+        // Guard: only act on transfers currently awaiting a decision.
+        DemoTransfer dt = transfersById.get(transferId);
+        if (dt == null || dt.getStatus() != TransferStatus.PENDING) return;
+
         UUID id;
         try {
             id = UUID.fromString(transferId);
         } catch (IllegalArgumentException e) {
-            return; // malformed id — defensive guard
+            return;
         }
 
         // Validate that the download destination is usable before we hand it
@@ -525,6 +529,10 @@ public class LinkViewModel {
      * @param transferId String representation of the transfer UUID
      */
     public void rejectTransfer(String transferId) {
+        // Guard: only act on transfers currently awaiting a decision.
+        DemoTransfer dt = transfersById.get(transferId);
+        if (dt == null || dt.getStatus() != TransferStatus.PENDING) return;
+
         UUID id;
         try {
             id = UUID.fromString(transferId);

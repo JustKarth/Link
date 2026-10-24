@@ -136,7 +136,13 @@ public class TransferCard extends VBox {
             pace.setVisible(true);
             percent.setVisible(true);
         } else if (t.getStatus() == TransferStatus.PAUSED || t.getStatus() == TransferStatus.PENDING) {
-            pace.setText(t.getStatus() == TransferStatus.PAUSED ? "Paused" : "Waiting…");
+            if (t.getStatus() == TransferStatus.PAUSED) {
+                pace.setText("Paused");
+            } else if (t.getDirection() == TransferDirection.INCOMING) {
+                pace.setText("Awaiting your decision");
+            } else {
+                pace.setText("Waiting…");
+            }
             pace.setVisible(true);
             percent.setVisible(t.getProgress() > 0);
         } else {
@@ -156,13 +162,22 @@ public class TransferCard extends VBox {
                     () -> state.cancelTransfer(transferId))); showControls = true; }
             case PENDING -> {
                     if (t.getDirection() == TransferDirection.INCOMING) {
-                        Button accept = textBtn("Accept",
-                                () -> state.acceptTransfer(transferId));
-                        Button reject = textBtn("Reject",
-                                () -> state.rejectTransfer(transferId));
+                        Button accept = new Button("Accept");
+                        Button reject = new Button("Reject");
 
-                        accept.getStyleClass().add("btn-accept");
-                        reject.getStyleClass().add("btn-reject");
+                        accept.getStyleClass().addAll("btn", "btn-accept");
+                        reject.getStyleClass().addAll("btn", "btn-reject");
+
+                        accept.setOnAction(e -> {
+                            accept.setDisable(true);
+                            reject.setDisable(true);
+                            state.acceptTransfer(transferId);
+                        });
+                        reject.setOnAction(e -> {
+                            accept.setDisable(true);
+                            reject.setDisable(true);
+                            state.rejectTransfer(transferId);
+                        });
 
                         controls.getChildren().addAll(accept, reject);
                     } else {
