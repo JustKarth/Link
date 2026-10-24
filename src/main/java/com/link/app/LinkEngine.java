@@ -94,4 +94,7 @@ public class LinkEngine {
     public int getPort() {
         return port;
     }
+    public DatabaseManager getDatabaseManager() {
+        return dbManager;
+    }
 }

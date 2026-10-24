@@ -5,6 +5,8 @@ import com.link.application.TransferObserver;
 import com.link.domain.Peer;
 import com.link.domain.TransferSession;
 import com.link.domain.TransferState;
+import com.link.persistence.DeviceRepository;
+import com.link.persistence.SavedDevice;
 import com.link.ui.demo.DemoActivity;
 import com.link.ui.demo.DemoDevice;
 import com.link.ui.demo.DemoTransfer;
@@ -70,6 +72,7 @@ public class LinkViewModel {
     // -------------------------------------------------------------------------
 
     private final LinkEngine engine;
+    private final DeviceRepository deviceRepository;
 
     /**
      * Observer passed into {@link LinkEngine}. Receives transfer state changes
@@ -145,6 +148,7 @@ public class LinkViewModel {
      */
     public LinkViewModel(String localDisplayName, int port) {
         this.engine = new LinkEngine(localDisplayName, port, transferObserver);
+        this.deviceRepository = new DeviceRepository(engine.getDatabaseManager());
 
         // Build the "self" device entry from the same data given to the engine.
         this.thisDevice = new DemoDevice(
@@ -891,5 +895,107 @@ public class LinkViewModel {
         dt.setStatus(status);
         if (status != TransferStatus.IN_PROGRESS) dt.setSpeedBytesPerSecond(0);
         fireChange();
+    }
+
+    // =========================================================================
+    // Saved-device vault — delegates to DeviceRepository (persistent)
+    // =========================================================================
+
+    /** Returns all persisted saved devices, favourites first. */
+    public List<SavedDevice> getSavedDevices() {
+        try {
+            return deviceRepository.loadAll();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Persists a discovered device as a saved device. If it was already saved
+     * the last-seen timestamp is refreshed. Fires a change event.
+     */
+    public void saveDevice(DemoDevice device) {
+        long now = System.currentTimeMillis();
+        boolean existing = false;
+        try { existing = deviceRepository.exists(device.getId()); } catch (Exception ignored) {}
+        SavedDevice sd = new SavedDevice(
+                device.getId(),
+                device.getName(),
+                device.getType().name(),
+                device.getIpAddress(),
+                false,
+                now,
+                now
+        );
+        if (existing) {
+            // Preserve the existing favorite flag.
+            List<SavedDevice> all = getSavedDevices();
+            for (SavedDevice s : all) {
+                if (s.getPeerId().equals(device.getId())) {
+                    sd = new SavedDevice(device.getId(), device.getName(),
+                            device.getType().name(), device.getIpAddress(),
+                            s.isFavorite(), s.getFirstSeenMillis(), now);
+                    break;
+                }
+            }
+        }
+        try {
+            deviceRepository.save(sd);
+        } catch (Exception e) {
+            // Log but do not crash the UI.
+        }
+        fireChange();
+    }
+
+    /**
+     * Removes a device from the saved list. Safe to call while transfers are
+     * active — does not affect ongoing sessions.
+     */
+    public void forgetDevice(String peerId) {
+        try {
+            deviceRepository.delete(peerId);
+        } catch (Exception e) {
+            // Log but do not crash.
+        }
+        fireChange();
+    }
+
+    /** Renames a saved device (display name only). Fires a change event. */
+    public void renameDevice(String peerId, String newName) {
+        if (newName == null || newName.isBlank()) return;
+        try {
+            deviceRepository.rename(peerId, newName.trim());
+        } catch (Exception e) {
+            // Log but do not crash.
+        }
+        fireChange();
+    }
+
+    /** Toggles the favourite flag for a saved device. Fires a change event. */
+    public void toggleFavorite(String peerId) {
+        List<SavedDevice> all = getSavedDevices();
+        for (SavedDevice sd : all) {
+            if (sd.getPeerId().equals(peerId)) {
+                try {
+                    deviceRepository.setFavorite(peerId, !sd.isFavorite());
+                } catch (Exception e) {
+                    // Log but do not crash.
+                }
+                break;
+            }
+        }
+        fireChange();
+    }
+
+    /**
+     * Returns true if the device with this peerId is in the saved list.
+     * Called from the DevicesView to show the correct "Save / Saved" button state.
+     */
+    public boolean isDeviceSaved(String peerId) {
+        try {
+            return deviceRepository.exists(peerId);
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

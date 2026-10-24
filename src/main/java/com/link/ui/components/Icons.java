@@ -128,6 +128,24 @@ public final class Icons {
     public static Node settings(double size, Color color) {
         return stroke("M4 7h16 M4 12h16 M4 17h16 M9 5v4 M15 10v4 M7 15v4", size, color, STROKE);
     }
+    public static Node devices(double size, Color color) {
+        // Two overlapping device outlines — laptop behind, phone in front-right
+        return stroke("M3 7h11v8H3z M3 17h11 M17 9h4v10h-4z M18.5 19.5h1", size, color, STROKE);
+    }
+    public static Node star(double size, Color color) {
+        return stroke("M12 3l2.5 5.5 6 .9-4.3 4.2 1 6-5.2-2.8L6.5 19.6l1-6L3.2 9.4l6-.9z",
+                size, color, STROKE);
+    }
+    public static Node starFilled(double size, Color color) {
+        return fill("M12 3l2.5 5.5 6 .9-4.3 4.2 1 6-5.2-2.8L6.5 19.6l1-6L3.2 9.4l6-.9z",
+                size, color);
+    }
+    public static Node edit(double size, Color color) {
+        return stroke("M4 20h4L18.5 9.5a2.83 2.83 0 0 0-4-4L4 16v4z M14.5 5.5l4 4", size, color, STROKE);
+    }
+    public static Node emptyDevices(double size, Color color) {
+        return stroke("M7 8h10v8H7z M5 18h14 M12 3a3 3 0 0 1 3 3", size, color, STROKE);
+    }
 
     // ---- Device types -----------------------------------------------------
 

@@ -718,3 +718,94 @@
     -fx-text-fill: -accent;
     -fx-font-weight: 600;
 }
+
+/* ---- Device Vault -------------------------------------------------------- */
+.vault-body { -fx-padding: 8 24 24 24; }
+.vault-scroll { -fx-background-color: transparent; -fx-padding: 0; }
+.vault-search-wrap { -fx-padding: 0 0 4 0; }
+.vault-section-title {
+    -fx-font-size: 10;
+    -fx-font-weight: 700;
+    -fx-text-fill: -text-3;
+    -fx-letter-spacing: 1.2;
+    -fx-padding: 0 0 2 2;
+}
+.vault-card-list { -fx-spacing: 6; }
+.vault-card {
+    -fx-background-color: -panel;
+    -fx-background-radius: 12;
+    -fx-border-color: -border-soft;
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-padding: 12 14 12 14;
+    -fx-cursor: default;
+}
+.vault-card:hover {
+    -fx-background-color: -panel-2;
+    -fx-border-color: -border;
+}
+.vault-card-rename { -fx-border-color: -accent; }
+.vault-card-confirm {
+    -fx-background-color: rgba(236,106,107,0.07);
+    -fx-border-color: rgba(236,106,107,0.30);
+}
+.vault-device-name { -fx-font-size: 13; -fx-font-weight: 600; -fx-text-fill: -text; }
+.vault-device-meta { -fx-font-size: 11; -fx-text-fill: -text-3; }
+.vault-icon-wrap {
+    -fx-background-radius: 10;
+    -fx-min-width: 36;
+    -fx-pref-width: 36;
+    -fx-max-width: 36;
+    -fx-min-height: 36;
+    -fx-pref-height: 36;
+    -fx-max-height: 36;
+    -fx-alignment: CENTER;
+}
+.vault-status-dot { -fx-background-radius: 4; }
+.vault-dot-online {
+    -fx-background-color: -success;
+    -fx-effect: dropshadow(gaussian, rgba(65,201,162,0.55), 5, 0.4, 0, 0);
+}
+.vault-dot-offline { -fx-background-color: -text-3; }
+.vault-icon-btn {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 5;
+    -fx-background-radius: 7;
+    -fx-cursor: hand;
+    -fx-opacity: 0.75;
+}
+.vault-icon-btn:hover { -fx-background-color: -panel-3; -fx-opacity: 1; }
+.vault-btn-danger:hover { -fx-background-color: rgba(236,106,107,0.12); -fx-opacity: 1; }
+.vault-btn-save {
+    -fx-background-color: rgba(0,242,254,0.12);
+    -fx-border-color: rgba(0,242,254,0.40);
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-text-fill: -accent;
+    -fx-font-size: 11;
+    -fx-font-weight: 700;
+    -fx-padding: 4 12 4 12;
+    -fx-cursor: hand;
+}
+.vault-btn-save:hover { -fx-background-color: rgba(0,242,254,0.22); -fx-border-color: rgba(0,242,254,0.65); }
+.vault-btn-save:pressed { -fx-background-color: rgba(0,242,254,0.30); }
+.vault-btn-save:disabled { -fx-opacity: 0.45; -fx-cursor: default; }
+.vault-btn-destructive {
+    -fx-background-color: rgba(236,106,107,0.14);
+    -fx-border-color: rgba(236,106,107,0.45);
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-text-fill: -error;
+    -fx-font-weight: 700;
+    -fx-font-size: 11;
+    -fx-padding: 4 12 4 12;
+    -fx-cursor: hand;
+}
+.vault-btn-destructive:hover {
+    -fx-background-color: rgba(236,106,107,0.24);
+    -fx-border-color: rgba(236,106,107,0.70);
+}
+.vault-confirm-text { -fx-font-size: 12; -fx-text-fill: -text-2; }
