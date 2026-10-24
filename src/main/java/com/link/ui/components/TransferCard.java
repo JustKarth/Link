@@ -154,8 +154,24 @@ public class TransferCard extends VBox {
             case PAUSED -> { controls.getChildren().addAll(iconBtn(Icons.play(15, Theme.TEXT_2),
                     () -> state.resumeTransfer(transferId)), iconBtn(Icons.cancel(15, Theme.TEXT_2),
                     () -> state.cancelTransfer(transferId))); showControls = true; }
-            case PENDING -> { controls.getChildren().add(iconBtn(Icons.cancel(15, Theme.TEXT_2),
-                    () -> state.cancelTransfer(transferId))); showControls = true; }
+            case PENDING -> {
+                    if (t.getDirection() == TransferDirection.INCOMING) {
+                        Button accept = textBtn("Accept",
+                                () -> state.acceptTransfer(transferId));
+                        Button reject = textBtn("Reject",
+                                () -> state.rejectTransfer(transferId));
+
+                        accept.getStyleClass().add("btn-accept");
+                        reject.getStyleClass().add("btn-reject");
+
+                        controls.getChildren().addAll(accept, reject);
+                    } else {
+                        controls.getChildren().add(iconBtn(
+                                Icons.cancel(15, Theme.TEXT_2),
+                                () -> state.cancelTransfer(transferId)));
+                    }
+                    showControls = true;
+                }
             case FAILED, CANCELLED -> { controls.getChildren().add(textBtn("Retry",
                     () -> state.retryTransfer(transferId))); showControls = true; }
             default -> { /* COMPLETED: no controls */ }

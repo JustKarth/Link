@@ -536,7 +536,7 @@ public class LinkViewModel {
         } catch (Exception e) {
             // Coordinator rejection failed; still update local UI state.
         }
-        updateTransferStatus(transferId, TransferStatus.FAILED);
+        updateTransferStatus(transferId, TransferStatus.CANCELLED);
     }
 
     /**
