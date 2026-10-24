@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 public class UdpDiscoveryService implements DiscoveryService {
 
@@ -26,6 +27,10 @@ public class UdpDiscoveryService implements DiscoveryService {
     
     // Thread-safe registry of discovered peers
     private final Map<String, Peer> peerRegistry = new ConcurrentHashMap<>();
+
+    private static final long PEER_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(10);
+
+    private final Map<String, Long> lastSeenAt = new ConcurrentHashMap<>();
 
     public UdpDiscoveryService(String localPeerId, String localDisplayName, int localTcpPort) {
         this.localPeerId = localPeerId;
@@ -60,6 +65,15 @@ public class UdpDiscoveryService implements DiscoveryService {
 
     @Override
     public List<Peer> getDiscoveredPeers() {
+        long now = System.currentTimeMillis();
+
+        lastSeenAt.forEach((peerId, lastSeen) -> {
+            if (now - lastSeen > PEER_TIMEOUT_MS) {
+                lastSeenAt.remove(peerId, lastSeen);
+                peerRegistry.remove(peerId);
+            }
+        });
+
         return new ArrayList<>(peerRegistry.values());
     }
 
@@ -122,7 +136,9 @@ public class UdpDiscoveryService implements DiscoveryService {
             String candidateAddress = senderIp + ":" + tcpPort;
             
             Peer peer = new Peer(peerId, displayName, candidateAddress, false);
+
             peerRegistry.put(peerIdVal, peer);
+            lastSeenAt.put(peerIdVal, System.currentTimeMillis());
         }
     }
 }

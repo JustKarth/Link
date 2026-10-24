@@ -12,7 +12,6 @@ import com.link.persistence.DatabaseManager;
 import com.link.persistence.TransferRepository;
 import com.link.transfer.FileTransferEngine;
 
-import java.util.UUID;
 
 public class LinkEngine {
 
@@ -28,7 +27,7 @@ public class LinkEngine {
     private final FileTransferEngine fileTransferEngine;
 
     public LinkEngine(String localDisplayName, int port, TransferObserver observer) {
-        this.localPeerId = UUID.randomUUID().toString();
+        this.localPeerId = DeviceIdentity.loadOrCreate();
         this.localDisplayName = localDisplayName;
         this.port = port;
 
