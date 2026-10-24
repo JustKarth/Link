@@ -40,20 +40,22 @@ public void close() {
     if (backdrop == null) return;
 
     StackPane closingBackdrop = backdrop;
+    Runnable afterClose = onClose;   // capture before nulling
 
     FadeTransition out =
             new FadeTransition(Duration.millis(120), closingBackdrop);
 
     out.setToValue(0);
-    out.setOnFinished(e ->
-            root.getChildren().remove(closingBackdrop));
+    out.setOnFinished(e -> {
+        root.getChildren().remove(closingBackdrop);
+        if (afterClose != null) afterClose.run();   // fire AFTER backdrop is gone
+    });
 
     out.play();
 
     closingBackdrop.setOnMousePressed(null);
     backdrop = null;
-
-    if (onClose != null) onClose.run();
+    // onClose is now fired inside onFinished, not here
 }
 
 
