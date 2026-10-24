@@ -1,175 +1,106 @@
 package com.link.transfer;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.link.application.DiscoveryService;
-import com.link.application.TransferObserver;
 import com.link.domain.Peer;
 import com.link.domain.PeerId;
 import com.link.domain.TransferDirection;
 import com.link.domain.TransferProgress;
-import com.link.domain.TransferSession;
 import com.link.domain.TransferState;
-import com.link.filesystem.IntegrityService;
 import com.link.networking.ConnectionManager;
 import com.link.networking.SecureSession;
+import com.link.transfer.models.ControlMessage;
+import com.link.transfer.models.FileInfo;
+import com.link.transfer.models.IncomingBatchState;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class FileTransferEngine {
 
-    private static final long UI_THROTTLE_MS = 100; // Minimum time between progress updates
-
     private final String localPeerId;
     private final String localDisplayName;
+    
     private final DiscoveryService discoveryService;
     private final ConnectionManager connectionManager;
-    private final IntegrityService integrityService;
-    private final TransferObserver observer;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final StreamWorker streamWorker;
+    private final TransferProtocolManager protocolManager;
+    private final SessionRepository repository;
+    private final TransferEventPublisher publisher;
+    
     private final ExecutorService transferPool = Executors.newCachedThreadPool();
-    
-    private final Map<UUID, SecureSession> activeSessions = new ConcurrentHashMap<>();
-    private final Map<UUID, IncomingBatchState> incomingBatches = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastNotificationTime = new ConcurrentHashMap<>();
-
-    public record FileInfo(String fileName, long fileSize, String checksum) {}
-
-    public record ControlMessage(
-        String type, 
-        String transferId, 
-        String fileName, 
-        long fileSize,
-        List<FileInfo> files,
-        String senderId,
-        String senderDisplayName,
-        String checksum
-    ) {}
-    
-    private record IncomingBatchState(List<FileInfo> files, long totalBatchSize, Peer peer) {}
 
     public FileTransferEngine(
-            String localPeerId,
-            String localDisplayName,
-            DiscoveryService discoveryService, 
-            ConnectionManager connectionManager, 
-            IntegrityService integrityService,
-            TransferObserver observer) {
+            String localPeerId, String localDisplayName,
+            DiscoveryService discoveryService, ConnectionManager connectionManager, 
+            StreamWorker streamWorker, TransferProtocolManager protocolManager,
+            SessionRepository repository, TransferEventPublisher publisher) {
+        
         this.localPeerId = localPeerId;
         this.localDisplayName = localDisplayName;
         this.discoveryService = discoveryService;
         this.connectionManager = connectionManager;
-        this.integrityService = integrityService;
-        this.observer = observer;
+        this.streamWorker = streamWorker;
+        this.protocolManager = protocolManager;
+        this.repository = repository;
+        this.publisher = publisher;
     }
 
+    // RESTORED: Matches the original method signature expected by DefaultTransferCoordinator
     public void initiateTransfer(UUID transferId, PeerId peerId, List<Path> sourcePaths) {
         transferPool.submit(() -> {
-            Peer targetPeer = null;
-            
-            String summaryName = sourcePaths.size() == 1 
-                    ? sourcePaths.get(0).getFileName().toString() 
-                    : sourcePaths.size() + " files";
+            String summaryName = sourcePaths.size() == 1 ? sourcePaths.get(0).getFileName().toString() : sourcePaths.size() + " files";
+            Peer peerForCatch = null;
 
             try {
-                targetPeer = discoveryService.getDiscoveredPeers().stream()
-                        .filter(p -> p.id().equals(peerId))
-                        .findFirst()
+                // 1. Declare as final so it can be safely used inside the lambda
+                final Peer targetPeer = discoveryService.getDiscoveredPeers().stream()
+                        .filter(p -> p.id().equals(peerId)).findFirst()
                         .orElseThrow(() -> new RuntimeException("Peer not found"));
-
-                // 1. Calculate checksums and build manifest
-                notifyUI(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.VERIFYING, new TransferProgress(0, 0, 0), null);
                 
-                List<FileInfo> fileManifest = new ArrayList<>();
-                long totalBatchBytes = 0;
+                peerForCatch = targetPeer;
 
-                for (Path p : sourcePaths) {
-                    File file = p.toFile();
-                    if (!file.exists() || !file.isFile()) continue;
-                    String checksum = integrityService.calculateSHA256(p);
-                    long len = file.length();
-                    totalBatchBytes += len;
-                    fileManifest.add(new FileInfo(file.getName(), len, checksum));
-                }
+                publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.VERIFYING, new TransferProgress(0, 0, 0), null);
 
-                if (fileManifest.isEmpty()) {
-                    throw new IllegalArgumentException("No valid files selected for transfer");
-                }
+                // Build manifest internally so caller doesn't have to
+                List<FileInfo> fileManifest = streamWorker.createFileManifest(sourcePaths);
+                if (fileManifest.isEmpty()) throw new IllegalArgumentException("No valid files selected");
+                long totalBatchBytes = fileManifest.stream().mapToLong(FileInfo::fileSize).sum();
 
                 SecureSession session = connectionManager.connect(targetPeer);
-                activeSessions.put(transferId, session);
+                repository.addSession(transferId, session);
                 
-                // 2. Transmit batch request manifest
-                ControlMessage request = new ControlMessage(
-                    "TRANSFER_REQUEST", 
-                    transferId.toString(), 
-                    summaryName, 
-                    totalBatchBytes,
-                    fileManifest,
-                    localPeerId,
-                    localDisplayName,
-                    null
-                );
-                session.sendMessage(mapper.writeValueAsString(request));
+                ControlMessage request = new ControlMessage("TRANSFER_REQUEST", transferId.toString(), summaryName, totalBatchBytes, fileManifest, localPeerId, localDisplayName, null, 0);
+                protocolManager.sendMessage(session, request);
 
-                String responseJson = session.receiveMessage();
-                ControlMessage response = mapper.readValue(responseJson, ControlMessage.class);
+                ControlMessage response = protocolManager.receiveMessage(session);
 
                 if ("TRANSFER_ACCEPTED".equals(response.type())) {
-                    notifyUI(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, 0, 0), null);
+                    long resumeOffset = response.offset();
+                    publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, resumeOffset, 0), null);
 
-                    long overallCompletedBytes = 0;
                     long startTime = System.currentTimeMillis();
-
-                    // 3. Sequential streaming of batch files
-                    for (Path path : sourcePaths) {
-                        File file = path.toFile();
-                        if (!file.exists() || !file.isFile()) continue;
-
-                        try (FileInputStream fis = new FileInputStream(file)) {
-                            byte[] buffer = new byte[8192];
-                            int read;
-                            while ((read = fis.read(buffer)) > 0) {
-                                if (read == buffer.length) {
-                                    session.sendData(buffer);
-                                } else {
-                                    byte[] exactChunk = new byte[read];
-                                    System.arraycopy(buffer, 0, exactChunk, 0, read);
-                                    session.sendData(exactChunk);
-                                }
-                                
-                                overallCompletedBytes += read;
-                                long elapsedMs = System.currentTimeMillis() - startTime;
-                                long speed = elapsedMs > 0 ? (overallCompletedBytes * 1000L) / elapsedMs : 0;
-                                
-                                // Throttled UI notification
-                                notifyUIThrottled(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, overallCompletedBytes, speed), null);
-                            }
-                        }
-                    }
-
-                    ControlMessage complete = new ControlMessage("TRANSFER_COMPLETED", transferId.toString(), null, 0, null, null, null, null);
-                    session.sendMessage(mapper.writeValueAsString(complete));
                     
-                    notifyUI(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.COMPLETED, new TransferProgress(totalBatchBytes, totalBatchBytes, 0), null);
-                } else if ("TRANSFER_REJECTED".equals(response.type())) {
-                    notifyUI(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(totalBatchBytes, 0, 0), "Peer rejected transfer");
-                }
+                    // 2. targetPeer is now final, so this lambda compiles perfectly
+                    streamWorker.sendFiles(session, sourcePaths, resumeOffset, (bytesSent) -> {
+                        long speed = calculateSpeed(startTime, bytesSent);
+                        publisher.publishThrottled(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, bytesSent, speed));
+                    });
 
+                    protocolManager.sendMessage(session, new ControlMessage("TRANSFER_COMPLETED", transferId.toString(), null, 0, null, null, null, null, 0));
+                    publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.COMPLETED, new TransferProgress(totalBatchBytes, totalBatchBytes, 0), null);
+                    
+                } else if ("TRANSFER_REJECTED".equals(response.type())) {
+                    publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(totalBatchBytes, 0, 0), "Peer rejected transfer");
+                }
             } catch (Exception e) {
-                e.printStackTrace();
-                notifyUI(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
+                // Use the fallback reference here in case it failed before the peer was found
+                publisher.publish(transferId, summaryName, TransferDirection.SENDING, peerForCatch, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
             } finally {
-                closeSession(transferId);
+                cleanupSession(transferId);
             }
         });
     }
@@ -177,32 +108,20 @@ public class FileTransferEngine {
     public void handleIncomingSession(SecureSession session) {
         transferPool.submit(() -> {
             try {
-                String requestJson = session.receiveMessage();
-                ControlMessage request = mapper.readValue(requestJson, ControlMessage.class);
+                ControlMessage request = protocolManager.receiveMessage(session);
 
                 if ("TRANSFER_REQUEST".equals(request.type())) {
                     UUID transferId = UUID.fromString(request.transferId());
-                    activeSessions.put(transferId, session);
+                    repository.addSession(transferId, session);
                     
-                    Peer senderPeer = new Peer(
-                        new PeerId(request.senderId() != null ? request.senderId() : "unknown-id"),
-                        request.senderDisplayName() != null ? request.senderDisplayName() : "Unknown",
-                        "",
-                        false
-                    );
+                    Peer senderPeer = new Peer(new PeerId(request.senderId()), request.senderDisplayName(), "", false);
+                    List<FileInfo> files = request.files() != null ? request.files() : List.of(new FileInfo(request.fileName(), request.fileSize(), request.checksum()));
+                    long totalSize = files.stream().mapToLong(FileInfo::fileSize).sum();
 
-                    List<FileInfo> files = request.files() != null && !request.files().isEmpty()
-                            ? request.files()
-                            : List.of(new FileInfo(request.fileName(), request.fileSize(), request.checksum()));
-
-                    long totalBatchSize = files.stream().mapToLong(FileInfo::fileSize).sum();
-
-                    incomingBatches.put(transferId, new IncomingBatchState(files, totalBatchSize, senderPeer));
-                    
-                    notifyUI(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.OFFERED, new TransferProgress(totalBatchSize, 0, 0), null);
+                    repository.addBatch(transferId, new IncomingBatchState(files, totalSize, senderPeer, null));
+                    publisher.publish(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.OFFERED, new TransferProgress(totalSize, 0, 0), null);
                 }
             } catch (Exception e) {
-                e.printStackTrace();
                 session.close();
             }
         });
@@ -210,132 +129,92 @@ public class FileTransferEngine {
 
     public void acceptTransfer(UUID transferId, Path destinationDirectory) {
         transferPool.submit(() -> {
-            SecureSession session = activeSessions.get(transferId);
-            IncomingBatchState batchState = incomingBatches.get(transferId);
-            if (session == null || batchState == null) return;
+            SecureSession session = repository.getSession(transferId);
+            IncomingBatchState batch = repository.getBatch(transferId);
+            if (session == null || batch == null) return;
 
-            String summaryName = batchState.files().size() == 1 
-                    ? batchState.files().get(0).fileName() 
-                    : batchState.files().size() + " files";
+            repository.addBatch(transferId, new IncomingBatchState(batch.files(), batch.totalBatchSize(), batch.peer(), destinationDirectory));
+            String summaryName = batch.files().size() == 1 ? batch.files().get(0).fileName() : batch.files().size() + " files";
 
             try {
-                ControlMessage acceptMsg = new ControlMessage("TRANSFER_ACCEPTED", transferId.toString(), null, 0, null, null, null, null);
-                session.sendMessage(mapper.writeValueAsString(acceptMsg));
+                long existingOffset = calculateExistingOffset(batch.files(), destinationDirectory);
+                
+                protocolManager.sendMessage(session, new ControlMessage("TRANSFER_ACCEPTED", transferId.toString(), null, 0, null, null, null, null, existingOffset));
+                publisher.publish(transferId, summaryName, TransferDirection.RECEIVING, batch.peer(), TransferState.TRANSFERRING, new TransferProgress(batch.totalBatchSize(), existingOffset, 0), null);
 
-                notifyUI(transferId, summaryName, TransferDirection.RECEIVING, batchState.peer(), TransferState.TRANSFERRING, new TransferProgress(batchState.totalBatchSize(), 0, 0), null);
-
-                long overallReceived = 0;
                 long startTime = System.currentTimeMillis();
-                List<File> receivedFiles = new ArrayList<>();
-
-                for (FileInfo fi : batchState.files()) {
-                    File destFile = destinationDirectory.resolve(fi.fileName()).toFile();
-                    receivedFiles.add(destFile);
-
-                    try (FileOutputStream fos = new FileOutputStream(destFile)) {
-                        long fileReceived = 0;
-                        while (fileReceived < fi.fileSize()) {
-                            byte[] chunk = session.receiveData();
-                            
-                            if (chunk.length > 0 && chunk[0] == '{') {
-                                String maybeJson = new String(chunk);
-                                if (maybeJson.contains("TRANSFER_COMPLETED")) break;
-                            }
-                            
-                            fos.write(chunk);
-                            fileReceived += chunk.length;
-                            overallReceived += chunk.length;
-
-                            long elapsedMs = System.currentTimeMillis() - startTime;
-                            long speed = elapsedMs > 0 ? (overallReceived * 1000L) / elapsedMs : 0;
-
-                            // Throttled UI notification
-                            notifyUIThrottled(transferId, summaryName, TransferDirection.RECEIVING, batchState.peer(), TransferState.TRANSFERRING, new TransferProgress(batchState.totalBatchSize(), overallReceived, speed), null);
-                        }
-                    }
-                }
                 
-                // Integrity verification pass for all received items
-                notifyUI(transferId, summaryName, TransferDirection.RECEIVING, batchState.peer(), TransferState.VERIFYING, new TransferProgress(batchState.totalBatchSize(), batchState.totalBatchSize(), 0), null);
+                streamWorker.receiveFiles(session, batch.files(), destinationDirectory, existingOffset, (bytesReceived) -> {
+                    long speed = calculateSpeed(startTime, bytesReceived);
+                    publisher.publishThrottled(transferId, summaryName, TransferDirection.RECEIVING, batch.peer(), TransferState.TRANSFERRING, new TransferProgress(batch.totalBatchSize(), bytesReceived, speed));
+                });
                 
-                boolean allValid = true;
-                for (int i = 0; i < batchState.files().size(); i++) {
-                    FileInfo fi = batchState.files().get(i);
-                    File f = receivedFiles.get(i);
-                    if (!integrityService.verifyFile(f.toPath(), fi.checksum())) {
-                        allValid = false;
-                        break;
-                    }
-                }
+                publisher.publish(transferId, summaryName, TransferDirection.RECEIVING, batch.peer(), TransferState.VERIFYING, new TransferProgress(batch.totalBatchSize(), batch.totalBatchSize(), 0), null);
 
-                if (allValid) {
-                    notifyUI(transferId, summaryName, TransferDirection.RECEIVING, batchState.peer(), TransferState.COMPLETED, new TransferProgress(batchState.totalBatchSize(), batchState.totalBatchSize(), 0), null);
+                if (streamWorker.verifyAndCommit(batch.files(), destinationDirectory)) {
+                    publisher.publish(transferId, summaryName, TransferDirection.RECEIVING, batch.peer(), TransferState.COMPLETED, new TransferProgress(batch.totalBatchSize(), batch.totalBatchSize(), 0), null);
                 } else {
-                    notifyUI(transferId, summaryName, TransferDirection.RECEIVING, batchState.peer(), TransferState.FAILED, new TransferProgress(batchState.totalBatchSize(), batchState.totalBatchSize(), 0), "Checksum mismatch: Batch corrupted during transfer.");
+                    streamWorker.cleanupTempFiles(batch.files(), destinationDirectory);
+                    publisher.publish(transferId, summaryName, TransferDirection.RECEIVING, batch.peer(), TransferState.FAILED, new TransferProgress(batch.totalBatchSize(), batch.totalBatchSize(), 0), "Checksum mismatch");
                 }
-                
             } catch (Exception e) {
-                e.printStackTrace();
-                notifyUI(transferId, summaryName, TransferDirection.RECEIVING, batchState.peer(), TransferState.FAILED, new TransferProgress(batchState.totalBatchSize(), 0, 0), e.getMessage());
+                publisher.publish(transferId, summaryName, TransferDirection.RECEIVING, batch.peer(), TransferState.FAILED, new TransferProgress(batch.totalBatchSize(), 0, 0), e.getMessage());
             } finally {
-                closeSession(transferId);
-                incomingBatches.remove(transferId);
+                cleanupSession(transferId);
             }
         });
     }
 
+    // RESTORED: Missing rejectTransfer method
     public void rejectTransfer(UUID transferId) {
         transferPool.submit(() -> {
-            SecureSession session = activeSessions.get(transferId);
-            IncomingBatchState batchState = incomingBatches.get(transferId);
-            String summaryName = batchState != null ? (batchState.files().size() == 1 ? batchState.files().get(0).fileName() : batchState.files().size() + " files") : "Unknown";
-            Peer peer = batchState != null ? batchState.peer() : null;
+            SecureSession session = repository.getSession(transferId);
+            IncomingBatchState batch = repository.getBatch(transferId);
+            String summaryName = batch != null ? (batch.files().size() == 1 ? batch.files().get(0).fileName() : batch.files().size() + " files") : "Unknown";
+            Peer peer = batch != null ? batch.peer() : null;
 
             if (session != null) {
                 try {
-                    ControlMessage rejectMsg = new ControlMessage("TRANSFER_REJECTED", transferId.toString(), null, 0, null, null, null, null);
-                    session.sendMessage(mapper.writeValueAsString(rejectMsg));
-                    notifyUI(transferId, summaryName, TransferDirection.RECEIVING, peer, TransferState.CANCELLED, null, "Transfer rejected by local user");
+                    protocolManager.sendMessage(session, new ControlMessage("TRANSFER_REJECTED", transferId.toString(), null, 0, null, null, null, null, 0));
+                    if (batch != null && batch.destDir() != null) {
+                        streamWorker.cleanupTempFiles(batch.files(), batch.destDir());
+                    }
+                    publisher.publish(transferId, summaryName, TransferDirection.RECEIVING, peer, TransferState.CANCELLED, null, "Transfer rejected by local user");
                 } catch (Exception e) {
                     e.printStackTrace();
                 } finally {
-                    closeSession(transferId);
-                    incomingBatches.remove(transferId);
+                    cleanupSession(transferId);
                 }
             }
         });
     }
 
     public void cancelTransfer(UUID transferId) {
-        IncomingBatchState batchState = incomingBatches.get(transferId);
-        String summaryName = batchState != null ? (batchState.files().size() == 1 ? batchState.files().get(0).fileName() : batchState.files().size() + " files") : "Unknown";
-        Peer peer = batchState != null ? batchState.peer() : null;
-
-        closeSession(transferId);
-        incomingBatches.remove(transferId);
-        notifyUI(transferId, summaryName, TransferDirection.SENDING, peer, TransferState.CANCELLED, null, "Transfer cancelled");
-    }
-
-    private void closeSession(UUID transferId) {
-        SecureSession session = activeSessions.remove(transferId);
-        lastNotificationTime.remove(transferId);
-        if (session != null) {
-            session.close();
+        IncomingBatchState batch = repository.getBatch(transferId);
+        if (batch != null) {
+            streamWorker.cleanupTempFiles(batch.files(), batch.destDir());
+            String summaryName = batch.files().size() == 1 ? batch.files().get(0).fileName() : batch.files().size() + " files";
+            publisher.publish(transferId, summaryName, TransferDirection.SENDING, batch.peer(), TransferState.CANCELLED, null, "Transfer cancelled");
         }
+        cleanupSession(transferId);
     }
 
-    private void notifyUIThrottled(UUID transferId, String fileName, TransferDirection direction, Peer peer, TransferState state, TransferProgress progress, String failureReason) {
-        long now = System.currentTimeMillis();
-        Long lastTime = lastNotificationTime.get(transferId);
+    private void cleanupSession(UUID transferId) {
+        repository.clear(transferId);
+        publisher.cleanup(transferId);
+    }
 
-        if (lastTime == null || (now - lastTime) >= UI_THROTTLE_MS) {
-            lastNotificationTime.put(transferId, now);
-            notifyUI(transferId, fileName, direction, peer, state, progress, failureReason);
+    private long calculateSpeed(long startTime, long currentBytes) {
+        long elapsed = System.currentTimeMillis() - startTime;
+        return elapsed > 0 ? (currentBytes * 1000L) / elapsed : 0;
+    }
+
+    private long calculateExistingOffset(List<FileInfo> files, Path destDir) {
+        long offset = 0;
+        for (FileInfo fi : files) {
+            File tmp = destDir.resolve(fi.fileName() + ".tmp").toFile();
+            if (tmp.exists()) offset += tmp.length();
         }
-    }
-
-    private void notifyUI(UUID transferId, String fileName, TransferDirection direction, Peer peer, TransferState state, TransferProgress progress, String failureReason) {
-        TransferSession snapshot = new TransferSession(transferId, fileName, direction, peer, state, progress, failureReason);
-        observer.onTransferUpdated(snapshot);
+        return offset;
     }
 }

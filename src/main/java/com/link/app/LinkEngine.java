@@ -45,13 +45,22 @@ public class LinkEngine {
         IntegrityService integrityService = new IntegrityService();
 
         // Pass ConnectionManager and IntegrityService so the engine can initiate network streams and verify hashes
-        this.fileTransferEngine = new FileTransferEngine(
-                this.localPeerId,
-                this.localDisplayName,
-                this.discoveryService, 
-                this.connectionManager, 
-                integrityService,
-                observer
+        com.link.transfer.StreamWorker streamWorker = new com.link.transfer.StreamWorker(integrityService);
+        com.link.transfer.TransferProtocolManager protocolManager = new com.link.transfer.TransferProtocolManager();
+        com.link.transfer.SessionRepository sessionRepository = new com.link.transfer.SessionRepository();
+        
+        // FIX: Changed 'transferObserver' to 'observer' to match the constructor parameter
+        com.link.transfer.TransferEventPublisher eventPublisher = new com.link.transfer.TransferEventPublisher(observer);
+
+        this.fileTransferEngine = new com.link.transfer.FileTransferEngine(
+            localPeerId,
+            localDisplayName,
+            discoveryService,
+            connectionManager,
+            streamWorker,
+            protocolManager,
+            sessionRepository,
+            eventPublisher
         );
 
         // Route incoming TCP connections to the Transfer Engine
