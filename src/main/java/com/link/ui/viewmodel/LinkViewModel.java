@@ -438,38 +438,31 @@ public class LinkViewModel {
             return SendResult.peerGone();
         }
 
-        List<DemoTransfer> created = new ArrayList<>();
-        for (Path path : sourcePaths) {
-            File f = path.toFile();
-            String name = f.getName();
-            String ext = name.lastIndexOf('.') >= 0
-                    ? name.substring(name.lastIndexOf('.') + 1)
-                    : "";
-
-            UUID transferId;
-            try {
-                transferId = engine.getTransferCoordinator()
-                        .requestTransfer(peer.id(), List.of(path));
-            } catch (Exception e) {
-                // One file failed; surface the error and stop.
-                return SendResult.coordinatorError(e.getMessage());
-            }
-
-            DemoTransfer dt = new DemoTransfer(
-                    transferId.toString(),
-                    name,
-                    f.length(),
-                    ext,
-                    TransferDirection.OUTGOING,
-                    destination.getName(),
-                    TransferStatus.PENDING,
-                    0.0,
-                    System.currentTimeMillis()
-            );
-            dt.setSpeedBytesPerSecond(0);
-            transfersById.put(transferId.toString(), dt);
-            created.add(dt);
+        // --- Single request batch call replacing the previous loop ---
+        UUID transferId;
+        try {
+            transferId = engine.getTransferCoordinator().requestTransfer(peer.id(), sourcePaths);
+        } catch (Exception e) {
+            return SendResult.coordinatorError(e.getMessage());
         }
+
+        String displayName = sourcePaths.size() == 1 
+                ? sourcePaths.get(0).getFileName().toString() 
+                : sourcePaths.size() + " files";
+
+        DemoTransfer dt = new DemoTransfer(
+                transferId.toString(),
+                displayName,
+                sourcePaths.stream().mapToLong(p -> p.toFile().length()).sum(),
+                sourcePaths.size() == 1 && displayName.contains(".") ? displayName.substring(displayName.lastIndexOf('.') + 1) : "ZIP",
+                TransferDirection.OUTGOING,
+                destination.getName(),
+                TransferStatus.PENDING,
+                0.0,
+                System.currentTimeMillis()
+        );
+        transfersById.put(transferId.toString(), dt);
+        List<DemoTransfer> created = List.of(dt);
 
         fireChange();
         return SendResult.ok(created);

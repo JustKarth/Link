@@ -5,6 +5,7 @@ import com.link.application.DiscoveryService;
 import com.link.application.TransferCoordinator;
 import com.link.application.TransferObserver;
 import com.link.discovery.UdpDiscoveryService;
+import com.link.filesystem.IntegrityService;
 import com.link.networking.ConnectionManager;
 import com.link.networking.DefaultConnectionManager;
 import com.link.persistence.DatabaseManager;
@@ -40,14 +41,17 @@ public class LinkEngine {
         this.connectionManager = new DefaultConnectionManager(port);
         this.discoveryService = new UdpDiscoveryService(localPeerId, localDisplayName, port);
 
-        // 3. File Transfer Engine
-        // The engine directly handles chunked byte streams for network efficiency
+        // 3. Core Filesystem and Engine Primitives
+        IntegrityService integrityService = new IntegrityService();
+
+        // Pass ConnectionManager and IntegrityService so the engine can initiate network streams and verify hashes
         this.fileTransferEngine = new FileTransferEngine(
-          this.localPeerId,
-            this.localDisplayName,
-            this.discoveryService, 
-            this.connectionManager, 
-            observer
+                this.localPeerId,
+                this.localDisplayName,
+                this.discoveryService, 
+                this.connectionManager, 
+                integrityService,
+                observer
         );
 
         // Route incoming TCP connections to the Transfer Engine
