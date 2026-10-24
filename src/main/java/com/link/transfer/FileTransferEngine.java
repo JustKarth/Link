@@ -27,6 +27,8 @@ import java.util.concurrent.Executors;
 
 public class FileTransferEngine {
 
+    private static final long UI_THROTTLE_MS = 100; // Minimum time between progress updates
+
     private final String localPeerId;
     private final String localDisplayName;
     private final DiscoveryService discoveryService;
@@ -38,6 +40,7 @@ public class FileTransferEngine {
     
     private final Map<UUID, SecureSession> activeSessions = new ConcurrentHashMap<>();
     private final Map<UUID, IncomingBatchState> incomingBatches = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastNotificationTime = new ConcurrentHashMap<>();
 
     public record FileInfo(String fileName, long fileSize, String checksum) {}
 
@@ -83,7 +86,7 @@ public class FileTransferEngine {
                         .findFirst()
                         .orElseThrow(() -> new RuntimeException("Peer not found"));
 
-                // 1. Calculate checksums and build manifest for all files
+                // 1. Calculate checksums and build manifest
                 notifyUI(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.VERIFYING, new TransferProgress(0, 0, 0), null);
                 
                 List<FileInfo> fileManifest = new ArrayList<>();
@@ -128,8 +131,8 @@ public class FileTransferEngine {
                     long startTime = System.currentTimeMillis();
 
                     // 3. Sequential streaming of batch files
-                    for (int i = 0; i < sourcePaths.size(); i++;) {
-                        File file = sourcePaths.get(i).toFile();
+                    for (Path path : sourcePaths) {
+                        File file = path.toFile();
                         if (!file.exists() || !file.isFile()) continue;
 
                         try (FileInputStream fis = new FileInputStream(file)) {
@@ -148,7 +151,8 @@ public class FileTransferEngine {
                                 long elapsedMs = System.currentTimeMillis() - startTime;
                                 long speed = elapsedMs > 0 ? (overallCompletedBytes * 1000L) / elapsedMs : 0;
                                 
-                                notifyUI(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, overallCompletedBytes, speed), null);
+                                // Throttled UI notification
+                                notifyUIThrottled(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, overallCompletedBytes, speed), null);
                             }
                         }
                     }
@@ -245,7 +249,8 @@ public class FileTransferEngine {
                             long elapsedMs = System.currentTimeMillis() - startTime;
                             long speed = elapsedMs > 0 ? (overallReceived * 1000L) / elapsedMs : 0;
 
-                            notifyUI(transferId, summaryName, TransferDirection.RECEIVING, batchState.peer(), TransferState.TRANSFERRING, new TransferProgress(batchState.totalBatchSize(), overallReceived, speed), null);
+                            // Throttled UI notification
+                            notifyUIThrottled(transferId, summaryName, TransferDirection.RECEIVING, batchState.peer(), TransferState.TRANSFERRING, new TransferProgress(batchState.totalBatchSize(), overallReceived, speed), null);
                         }
                     }
                 }
@@ -313,8 +318,19 @@ public class FileTransferEngine {
 
     private void closeSession(UUID transferId) {
         SecureSession session = activeSessions.remove(transferId);
+        lastNotificationTime.remove(transferId);
         if (session != null) {
             session.close();
+        }
+    }
+
+    private void notifyUIThrottled(UUID transferId, String fileName, TransferDirection direction, Peer peer, TransferState state, TransferProgress progress, String failureReason) {
+        long now = System.currentTimeMillis();
+        Long lastTime = lastNotificationTime.get(transferId);
+
+        if (lastTime == null || (now - lastTime) >= UI_THROTTLE_MS) {
+            lastNotificationTime.put(transferId, now);
+            notifyUI(transferId, fileName, direction, peer, state, progress, failureReason);
         }
     }
 
