@@ -5,6 +5,7 @@ import com.link.application.DiscoveryService;
 import com.link.application.TransferCoordinator;
 import com.link.application.TransferObserver;
 import com.link.discovery.UdpDiscoveryService;
+import com.link.filesystem.IntegrityService;
 import com.link.networking.ConnectionManager;
 import com.link.networking.DefaultConnectionManager;
 import com.link.persistence.DatabaseManager;
@@ -40,14 +41,26 @@ public class LinkEngine {
         this.connectionManager = new DefaultConnectionManager(port);
         this.discoveryService = new UdpDiscoveryService(localPeerId, localDisplayName, port);
 
-        // 3. File Transfer Engine
-        // The engine directly handles chunked byte streams for network efficiency
-        this.fileTransferEngine = new FileTransferEngine(
-          this.localPeerId,
-            this.localDisplayName,
-            this.discoveryService, 
-            this.connectionManager, 
-            observer
+        // 3. Core Filesystem and Engine Primitives
+        IntegrityService integrityService = new IntegrityService();
+
+        // Pass ConnectionManager and IntegrityService so the engine can initiate network streams and verify hashes
+        com.link.transfer.StreamWorker streamWorker = new com.link.transfer.StreamWorker(integrityService);
+        com.link.transfer.TransferProtocolManager protocolManager = new com.link.transfer.TransferProtocolManager();
+        com.link.transfer.SessionRepository sessionRepository = new com.link.transfer.SessionRepository();
+        
+        // FIX: Changed 'transferObserver' to 'observer' to match the constructor parameter
+        com.link.transfer.TransferEventPublisher eventPublisher = new com.link.transfer.TransferEventPublisher(observer);
+
+        this.fileTransferEngine = new com.link.transfer.FileTransferEngine(
+            localPeerId,
+            localDisplayName,
+            discoveryService,
+            connectionManager,
+            streamWorker,
+            protocolManager,
+            sessionRepository,
+            eventPublisher
         );
 
         // Route incoming TCP connections to the Transfer Engine
