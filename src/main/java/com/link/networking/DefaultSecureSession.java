@@ -1,28 +1,56 @@
 package com.link.networking;
 
+import javax.net.ssl.SSLSocket;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.cert.Certificate;
 
 public class DefaultSecureSession implements SecureSession {
 
-    private final Socket socket;
+   private final Socket socket;
     private final DataInputStream in;
     private final DataOutputStream out;
     private final FrameCodec frameCodec;
+    private final PeerTrustService trustService;
+    private String remoteFingerprint;
+    private String sasPairingCode;
 
-    public DefaultSecureSession(Socket socket) throws IOException {
+    // Update constructor to require PeerTrustService
+    public DefaultSecureSession(Socket socket, PeerTrustService trustService) throws IOException {
         this.socket = socket;
         this.in = new DataInputStream(socket.getInputStream());
         this.out = new DataOutputStream(socket.getOutputStream());
         this.frameCodec = new FrameCodec();
+        this.trustService = trustService;
     }
 
     @Override
     public void authenticatePeer() {
-        // TLS handshake and PIN validation will be integrated here
+        if (socket instanceof SSLSocket sslSocket) {
+            try {
+                var session = sslSocket.getSession();
+                Certificate[] certs = session.getPeerCertificates();
+                if (certs.length > 0) {
+                    this.remoteFingerprint = trustService.computeFingerprint(certs[0]);
+                    
+                    String localFingerprint = trustService.computeFingerprint(SslContextFactory.getLocalCertificate());
+                    this.sasPairingCode = trustService.generateSASCode(remoteFingerprint, localFingerprint);
+                }
+            } catch (Exception e) {
+                throw new SecurityException("TLS peer authentication failed", e);
+            }
+        }
+    }
+
+    public String getRemoteFingerprint() {
+        return remoteFingerprint;
+    }
+
+    public String getSasPairingCode() {
+        return sasPairingCode;
     }
 
     @Override

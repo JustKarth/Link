@@ -1,20 +1,26 @@
 package com.link.networking;
 
-import com.link.domain.Peer;
-
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.function.Consumer;
 
+import javax.net.ssl.SSLServerSocketFactory;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+
 public class DefaultConnectionManager implements ConnectionManager {
 
     private final int port;
+    private final PeerTrustService trustService; // <-- 1. Add this field
     private ServerSocket serverSocket;
     private Consumer<SecureSession> incomingSessionHandler;
+    private volatile boolean isRunning = false;
 
-    public DefaultConnectionManager(int port) {
+    // 2. Update constructor to accept the trust service
+    public DefaultConnectionManager(int port, PeerTrustService trustService) {
         this.port = port;
+        this.trustService = trustService;
     }
 
     @Override
@@ -24,47 +30,67 @@ public class DefaultConnectionManager implements ConnectionManager {
 
     @Override
     public void listen() {
+        isRunning = true;
         new Thread(() -> {
             try {
-                serverSocket = new ServerSocket(port);
-                while (!serverSocket.isClosed()) {
+                // Obtain SSLServerSocketFactory from SslContextFactory
+                SSLServerSocketFactory ssf = SslContextFactory.getSSLContext().getServerSocketFactory();
+                serverSocket = ssf.createServerSocket(port);
+
+                while (isRunning) {
                     Socket clientSocket = serverSocket.accept();
-                    SecureSession session = new DefaultSecureSession(clientSocket);
-                    
+
+                    if (clientSocket instanceof SSLSocket sslSocket) {
+                        sslSocket.setUseClientMode(false);
+                        // Require remote client to present its TLS certificate
+                        sslSocket.setNeedClientAuth(true);
+                        sslSocket.startHandshake();
+                    }
+
+                    DefaultSecureSession session = new DefaultSecureSession(clientSocket, trustService);
+                    session.authenticatePeer();
+
                     if (incomingSessionHandler != null) {
                         incomingSessionHandler.accept(session);
                     }
                 }
-            } catch (IOException e) {
-                // Handle listen failure gracefully if closed intentionally
-                if (serverSocket != null && !serverSocket.isClosed()) {
+            } catch (Exception e) {
+                if (isRunning) {
                     e.printStackTrace();
                 }
             }
-        }, "TCP-Listener-Thread").start();
+        }, "Link-NetworkListener").start();
     }
 
     @Override
-    public SecureSession connect(Peer peer) {
+    public SecureSession connect(com.link.domain.Peer peer) {
         try {
             String[] parts = peer.candidateAddress().split(":");
             String ip = parts[0];
-            int peerPort = Integer.parseInt(parts[1]);
-            
-            Socket socket = new Socket(ip, peerPort);
-            return new DefaultSecureSession(socket);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to connect to peer", e);
+            int peerPort = parts.length > 1 ? Integer.parseInt(parts[1]) : port;
+
+            // Obtain SSLSocketFactory from SslContextFactory
+            SSLSocketFactory ssf = SslContextFactory.getSSLContext().getSocketFactory();
+            SSLSocket socket = (SSLSocket) ssf.createSocket(ip, peerPort);
+            socket.setUseClientMode(true);
+            socket.startHandshake();
+
+            DefaultSecureSession session = new DefaultSecureSession(socket, trustService);
+            session.authenticatePeer();
+            return session;
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to connect to peer: " + peer.displayName(), e);
         }
     }
 
     @Override
     public void closeConnection() {
-        if (serverSocket != null && !serverSocket.isClosed()) {
-            try {
+        isRunning = false;
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
-            } catch (IOException ignored) {
             }
-        }
+        } catch (IOException ignored) {}
     }
 }

@@ -21,10 +21,17 @@ public class TransferEventPublisher {
         this.observer = observer;
     }
 
+    // NEW: 8-argument signature for pairing events
+    public void publish(UUID transferId, String fileName, TransferDirection direction, 
+                       Peer peer, TransferState state, TransferProgress progress, String error, String sasCode) {
+        TransferSession snapshot = new TransferSession(transferId, fileName, direction, peer, state, progress, error, sasCode);
+        observer.onTransferUpdated(snapshot);
+    }
+
+    // ORIGINAL: 7-argument signature forwards to the new one with a null sasCode
     public void publish(UUID transferId, String fileName, TransferDirection direction, 
                        Peer peer, TransferState state, TransferProgress progress, String error) {
-        TransferSession snapshot = new TransferSession(transferId, fileName, direction, peer, state, progress, error);
-        observer.onTransferUpdated(snapshot);
+        publish(transferId, fileName, direction, peer, state, progress, error, null);
     }
 
     public void publishThrottled(UUID transferId, String fileName, TransferDirection direction, 
@@ -34,7 +41,7 @@ public class TransferEventPublisher {
 
         if (lastTime == null || (now - lastTime) >= UI_THROTTLE_MS) {
             lastNotificationTime.put(transferId, now);
-            publish(transferId, fileName, direction, peer, state, progress, null);
+            publish(transferId, fileName, direction, peer, state, progress, null, null);
         }
     }
 

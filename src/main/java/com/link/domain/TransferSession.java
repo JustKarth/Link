@@ -9,5 +9,6 @@ public record TransferSession(
     Peer peer,
     TransferState state,
     TransferProgress progress,
-    String failureReason
+    String failureReason,
+    String sasCode
 ) {}

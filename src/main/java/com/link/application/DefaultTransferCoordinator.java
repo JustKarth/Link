@@ -37,6 +37,11 @@ public class DefaultTransferCoordinator implements TransferCoordinator {
     }
 
     @Override
+    public void confirmPairing(UUID transferId, boolean accepted) {
+        fileTransferEngine.confirmPairing(transferId, accepted);
+    }
+
+    @Override
     public void rejectTransfer(UUID transferId) {
         repository.updateTransferState(transferId.toString(), "FAILED", 0L);
         fileTransferEngine.rejectTransfer(transferId);
