@@ -7,6 +7,7 @@ import com.link.domain.TransferDirection;
 import com.link.domain.TransferProgress;
 import com.link.domain.TransferState;
 import com.link.networking.ConnectionManager;
+import com.link.networking.PeerTrustService;
 import com.link.networking.SecureSession;
 import com.link.transfer.models.ControlMessage;
 import com.link.transfer.models.FileInfo;
@@ -30,6 +31,7 @@ public class FileTransferEngine {
     private final TransferProtocolManager protocolManager;
     private final SessionRepository repository;
     private final TransferEventPublisher publisher;
+    private final PeerTrustService trustService;
     
     private final ExecutorService transferPool = Executors.newCachedThreadPool();
 
@@ -37,7 +39,8 @@ public class FileTransferEngine {
             String localPeerId, String localDisplayName,
             DiscoveryService discoveryService, ConnectionManager connectionManager, 
             StreamWorker streamWorker, TransferProtocolManager protocolManager,
-            SessionRepository repository, TransferEventPublisher publisher) {
+            SessionRepository repository, TransferEventPublisher publisher,
+            PeerTrustService trustService) {
         
         this.localPeerId = localPeerId;
         this.localDisplayName = localDisplayName;
@@ -47,60 +50,76 @@ public class FileTransferEngine {
         this.protocolManager = protocolManager;
         this.repository = repository;
         this.publisher = publisher;
+        this.trustService = trustService;
     }
 
-    // RESTORED: Matches the original method signature expected by DefaultTransferCoordinator
     public void initiateTransfer(UUID transferId, PeerId peerId, List<Path> sourcePaths) {
         transferPool.submit(() -> {
             String summaryName = sourcePaths.size() == 1 ? sourcePaths.get(0).getFileName().toString() : sourcePaths.size() + " files";
-            Peer peerForCatch = null;
-
+            
             try {
-                // 1. Declare as final so it can be safely used inside the lambda
                 final Peer targetPeer = discoveryService.getDiscoveredPeers().stream()
                         .filter(p -> p.id().equals(peerId)).findFirst()
                         .orElseThrow(() -> new RuntimeException("Peer not found"));
-                
-                peerForCatch = targetPeer;
 
                 publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.VERIFYING, new TransferProgress(0, 0, 0), null);
 
-                // Build manifest internally so caller doesn't have to
-                List<FileInfo> fileManifest = streamWorker.createFileManifest(sourcePaths);
-                if (fileManifest.isEmpty()) throw new IllegalArgumentException("No valid files selected");
-                long totalBatchBytes = fileManifest.stream().mapToLong(FileInfo::fileSize).sum();
-
                 SecureSession session = connectionManager.connect(targetPeer);
-                repository.addSession(transferId, session);
                 
-                ControlMessage request = new ControlMessage("TRANSFER_REQUEST", transferId.toString(), summaryName, totalBatchBytes, fileManifest, localPeerId, localDisplayName, null, 0);
-                protocolManager.sendMessage(session, request);
+                // --- SECURITY HANDSHAKE ---
+                String peerFingerprint = session.getRemoteFingerprint();
 
-                ControlMessage response = protocolManager.receiveMessage(session);
-
-                if ("TRANSFER_ACCEPTED".equals(response.type())) {
-                    long resumeOffset = response.offset();
-                    publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, resumeOffset, 0), null);
-
-                    long startTime = System.currentTimeMillis();
+                if (!trustService.isPeerTrusted(targetPeer.id().toString(), peerFingerprint)) {
+                    String sasCode = session.getSasPairingCode();
                     
-                    // 2. targetPeer is now final, so this lambda compiles perfectly
-                    streamWorker.sendFiles(session, sourcePaths, resumeOffset, (bytesSent) -> {
-                        long speed = calculateSpeed(startTime, bytesSent);
-                        publisher.publishThrottled(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, bytesSent, speed));
-                    });
-
-                    protocolManager.sendMessage(session, new ControlMessage("TRANSFER_COMPLETED", transferId.toString(), null, 0, null, null, null, null, 0));
-                    publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.COMPLETED, new TransferProgress(totalBatchBytes, totalBatchBytes, 0), null);
+                    // Save state and pause thread
+                    repository.addPendingOutgoing(transferId, new SessionRepository.OutgoingPendingState(targetPeer, session, sourcePaths, peerFingerprint));
                     
-                } else if ("TRANSFER_REJECTED".equals(response.type())) {
-                    publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(totalBatchBytes, 0, 0), "Peer rejected transfer");
+                    // Publish PAIRING state with the SAS code (assuming you added it to publisher args)
+                    publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.PAIRING, new TransferProgress(0, 0, 0), null, sasCode);
+                    return; // Exit thread. Engine is now paused.
                 }
+
+                // If already trusted, proceed immediately
+                proceedWithOutgoingTransfer(transferId, targetPeer, session, sourcePaths);
+
             } catch (Exception e) {
-                // Use the fallback reference here in case it failed before the peer was found
-                publisher.publish(transferId, summaryName, TransferDirection.SENDING, peerForCatch, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
-            } finally {
+                publisher.publish(transferId, summaryName, TransferDirection.SENDING, null, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
                 cleanupSession(transferId);
+            }
+        });
+    }
+
+    public void confirmPairing(UUID transferId, boolean accepted) {
+        transferPool.submit(() -> {
+            // Check Outgoing
+            SessionRepository.OutgoingPendingState pendingOut = repository.getAndRemovePendingOutgoing(transferId);
+            if (pendingOut != null) {
+                if (accepted) {
+                    trustService.trustPeer(pendingOut.targetPeer().id().toString(), pendingOut.fingerprint());
+                    proceedWithOutgoingTransfer(transferId, pendingOut.targetPeer(), pendingOut.session(), pendingOut.sourcePaths());
+                } else {
+                    pendingOut.session().close();
+                    publisher.publish(transferId, "Unknown", TransferDirection.SENDING, pendingOut.targetPeer(), TransferState.CANCELLED, null, "Pairing rejected", null);
+                }
+                return;
+            }
+
+            // Check Incoming
+            SessionRepository.IncomingPendingState pendingIn = repository.getAndRemovePendingIncoming(transferId);
+            if (pendingIn != null) {
+                if (accepted) {
+                    trustService.trustPeer(pendingIn.request().senderId(), pendingIn.fingerprint());
+                    proceedWithIncomingTransfer(transferId, pendingIn.request(), pendingIn.session());
+                } else {
+                    try {
+                        protocolManager.sendMessage(pendingIn.session(), new ControlMessage("TRANSFER_REJECTED", transferId.toString(), null, 0, null, null, null, null, 0));
+                    } catch (Exception ignored) {}
+                    
+                    pendingIn.session().close();
+                    Peer senderPeer = new Peer(new PeerId(pendingIn.request().senderId()), pendingIn.request().senderDisplayName(), "", false);
+                    publisher.publish(transferId, pendingIn.request().fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.CANCELLED, null, "Pairing rejected", null);
+                }
             }
         });
     }
@@ -112,14 +131,26 @@ public class FileTransferEngine {
 
                 if ("TRANSFER_REQUEST".equals(request.type())) {
                     UUID transferId = UUID.fromString(request.transferId());
-                    repository.addSession(transferId, session);
                     
-                    Peer senderPeer = new Peer(new PeerId(request.senderId()), request.senderDisplayName(), "", false);
-                    List<FileInfo> files = request.files() != null ? request.files() : List.of(new FileInfo(request.fileName(), request.fileSize(), request.checksum()));
-                    long totalSize = files.stream().mapToLong(FileInfo::fileSize).sum();
+                    // --- SECURITY HANDSHAKE ---
+                    String peerFingerprint = session.getRemoteFingerprint();
+                    String senderId = request.senderId();
 
-                    repository.addBatch(transferId, new IncomingBatchState(files, totalSize, senderPeer, null));
-                    publisher.publish(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.OFFERED, new TransferProgress(totalSize, 0, 0), null);
+                    if (!trustService.isPeerTrusted(senderId, peerFingerprint)) {
+                        String sasCode = session.getSasPairingCode();
+                        
+                        // Save state and pause thread
+                        repository.addPendingIncoming(transferId, new SessionRepository.IncomingPendingState(request, session, peerFingerprint));
+                        
+                        Peer senderPeer = new Peer(new PeerId(senderId), request.senderDisplayName(), "", false);
+                        
+                        // Publish PAIRING state with the SAS code
+                        publisher.publish(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.PAIRING, new TransferProgress(0, 0, 0), null, sasCode);
+                        return; // Exit thread. Engine is now paused.
+                    }
+
+                    // If already trusted, proceed immediately
+                    proceedWithIncomingTransfer(transferId, request, session);
                 }
             } catch (Exception e) {
                 session.close();
@@ -165,7 +196,6 @@ public class FileTransferEngine {
         });
     }
 
-    // RESTORED: Missing rejectTransfer method
     public void rejectTransfer(UUID transferId) {
         transferPool.submit(() -> {
             SecureSession session = repository.getSession(transferId);
@@ -197,6 +227,55 @@ public class FileTransferEngine {
             publisher.publish(transferId, summaryName, TransferDirection.SENDING, batch.peer(), TransferState.CANCELLED, null, "Transfer cancelled");
         }
         cleanupSession(transferId);
+    }
+
+    private void proceedWithIncomingTransfer(UUID transferId, ControlMessage request, SecureSession session) {
+        repository.addSession(transferId, session);
+                    
+        Peer senderPeer = new Peer(new PeerId(request.senderId()), request.senderDisplayName(), "", false);
+        List<FileInfo> files = request.files() != null ? request.files() : List.of(new FileInfo(request.fileName(), request.fileSize(), request.checksum()));
+        long totalSize = files.stream().mapToLong(FileInfo::fileSize).sum();
+
+        repository.addBatch(transferId, new IncomingBatchState(files, totalSize, senderPeer, null));
+        publisher.publish(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.OFFERED, new TransferProgress(totalSize, 0, 0), null, null);
+    }
+
+    private void proceedWithOutgoingTransfer(UUID transferId, Peer targetPeer, SecureSession session, List<Path> sourcePaths) {
+        String summaryName = sourcePaths.size() == 1 ? sourcePaths.get(0).getFileName().toString() : sourcePaths.size() + " files";
+        try {
+            List<FileInfo> fileManifest = streamWorker.createFileManifest(sourcePaths);
+            if (fileManifest.isEmpty()) throw new IllegalArgumentException("No valid files selected");
+            long totalBatchBytes = fileManifest.stream().mapToLong(FileInfo::fileSize).sum();
+
+            repository.addSession(transferId, session);
+            
+            ControlMessage request = new ControlMessage("TRANSFER_REQUEST", transferId.toString(), summaryName, totalBatchBytes, fileManifest, localPeerId, localDisplayName, null, 0);
+            protocolManager.sendMessage(session, request);
+
+            ControlMessage response = protocolManager.receiveMessage(session);
+
+            if ("TRANSFER_ACCEPTED".equals(response.type())) {
+                long resumeOffset = response.offset();
+                publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, resumeOffset, 0), null);
+
+                long startTime = System.currentTimeMillis();
+                
+                streamWorker.sendFiles(session, sourcePaths, resumeOffset, (bytesSent) -> {
+                    long speed = calculateSpeed(startTime, bytesSent);
+                    publisher.publishThrottled(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, bytesSent, speed));
+                });
+
+                protocolManager.sendMessage(session, new ControlMessage("TRANSFER_COMPLETED", transferId.toString(), null, 0, null, null, null, null, 0));
+                publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.COMPLETED, new TransferProgress(totalBatchBytes, totalBatchBytes, 0), null);
+                
+            } else if ("TRANSFER_REJECTED".equals(response.type())) {
+                publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(totalBatchBytes, 0, 0), "Peer rejected transfer");
+            }
+        } catch (Exception e) {
+            publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
+        } finally {
+            cleanupSession(transferId);
+        }
     }
 
     private void cleanupSession(UUID transferId) {

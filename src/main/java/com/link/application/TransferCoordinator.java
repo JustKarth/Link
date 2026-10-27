@@ -6,8 +6,9 @@ import java.util.List;
 import java.util.UUID;
 
 public interface TransferCoordinator {
-    UUID requestTransfer(PeerId peerId, List<Path> sourcePaths); 
-    void acceptTransfer(UUID transferId, Path destinationDirectory);
+    UUID requestTransfer(PeerId targetPeerId, List<Path> sourcePaths);
+    void acceptTransfer(UUID transferId, Path downloadDirectory);
     void rejectTransfer(UUID transferId);
     void cancelTransfer(UUID transferId);
+    void confirmPairing(UUID transferId, boolean accepted);
 }

@@ -473,6 +473,26 @@ public class LinkViewModel {
     // =========================================================================
 
     /**
+     * Confirms or rejects a security pairing code for an untrusted device.
+     *
+     * @param transferId String representation of the transfer UUID
+     * @param accepted   true if the user verified the SAS code matches, false otherwise
+     */
+    public void confirmPairing(String transferId, boolean accepted) {
+        DemoTransfer dt = transfersById.get(transferId);
+        if (dt == null) return;
+
+        try {
+            UUID id = UUID.fromString(transferId);
+            engine.getTransferCoordinator().confirmPairing(id, accepted);
+        } catch (IllegalArgumentException e) {
+            return; // Invalid UUID string
+        } catch (Exception e) {
+            updateTransferStatus(transferId, TransferStatus.FAILED);
+        }
+    }
+
+    /**
      * Accepts an incoming transfer, setting the destination to the path
      * configured in {@link SettingsModel#getDownloadDestination()}.
      * Validates that the download directory exists (or can be created) before
@@ -826,6 +846,7 @@ public class LinkViewModel {
             case COMPLETED    -> TransferStatus.COMPLETED;
             case CANCELLED    -> TransferStatus.CANCELLED;
             case FAILED       -> TransferStatus.FAILED;
+            case PAIRING      -> TransferStatus.PENDING;
         };
     }
 

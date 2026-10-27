@@ -8,10 +8,12 @@ import com.link.discovery.UdpDiscoveryService;
 import com.link.filesystem.IntegrityService;
 import com.link.networking.ConnectionManager;
 import com.link.networking.DefaultConnectionManager;
+import com.link.networking.DefaultPeerTrustService;
+import com.link.networking.PeerTrustService;
 import com.link.persistence.DatabaseManager;
 import com.link.persistence.TransferRepository;
+import com.link.persistence.TrustRepository;
 import com.link.transfer.FileTransferEngine;
-
 
 public class LinkEngine {
 
@@ -25,6 +27,7 @@ public class LinkEngine {
     private final ConnectionManager connectionManager;
     private final TransferCoordinator transferCoordinator;
     private final FileTransferEngine fileTransferEngine;
+    private final PeerTrustService trustService;
 
     public LinkEngine(String localDisplayName, int port, TransferObserver observer) {
         this.localPeerId = DeviceIdentity.loadOrCreate();
@@ -35,20 +38,23 @@ public class LinkEngine {
         this.dbManager = new DatabaseManager("link_data.db");
         this.dbManager.initializeDatabase();
         this.transferRepository = new TransferRepository(dbManager);
+        
+        // Initialize the new SQLite Trust Repository
+        TrustRepository trustRepository = new TrustRepository(dbManager);
 
-        // 2. Network Connections & Discovery
-        this.connectionManager = new DefaultConnectionManager(port);
+        // 2. Trust & Security System Setup (Inject the repository)
+        this.trustService = new DefaultPeerTrustService(trustRepository);
+
+        // 3. Network Connections & Discovery (Pass the trust service to the connection manager)
+        this.connectionManager = new DefaultConnectionManager(port, trustService);
         this.discoveryService = new UdpDiscoveryService(localPeerId, localDisplayName, port);
 
-        // 3. Core Filesystem and Engine Primitives
+        // 4. Core Filesystem and Engine Primitives
         IntegrityService integrityService = new IntegrityService();
 
-        // Pass ConnectionManager and IntegrityService so the engine can initiate network streams and verify hashes
         com.link.transfer.StreamWorker streamWorker = new com.link.transfer.StreamWorker(integrityService);
         com.link.transfer.TransferProtocolManager protocolManager = new com.link.transfer.TransferProtocolManager();
         com.link.transfer.SessionRepository sessionRepository = new com.link.transfer.SessionRepository();
-        
-        // FIX: Changed 'transferObserver' to 'observer' to match the constructor parameter
         com.link.transfer.TransferEventPublisher eventPublisher = new com.link.transfer.TransferEventPublisher(observer);
 
         this.fileTransferEngine = new com.link.transfer.FileTransferEngine(
@@ -59,13 +65,14 @@ public class LinkEngine {
             streamWorker,
             protocolManager,
             sessionRepository,
-            eventPublisher
+            eventPublisher,
+            trustService
         );
 
-        // Route incoming TCP connections to the Transfer Engine
+        // Route incoming TCP/TLS connections to the Transfer Engine
         this.connectionManager.setIncomingSessionHandler(this.fileTransferEngine::handleIncomingSession);
 
-        // 4. Transfer Coordinator (Updated to match the new 2-argument constructor)
+        // 5. Transfer Coordinator
         this.transferCoordinator = new DefaultTransferCoordinator(
                 this.fileTransferEngine,
                 this.transferRepository
@@ -75,11 +82,13 @@ public class LinkEngine {
     public void start() {
         connectionManager.listen();
         discoveryService.start();
+        System.out.println("[LinkEngine] Network listener and trust system initialized on port " + port);
     }
 
     public void stop() {
         discoveryService.stop();
         connectionManager.closeConnection();
+        System.out.println("[LinkEngine] Stopped network engine.");
     }
 
     public DiscoveryService getDiscoveryService() {
@@ -94,7 +103,10 @@ public class LinkEngine {
         return transferRepository;
     }
 
-    // Added getters to resolve the "unused field" highlights
+    public PeerTrustService getTrustService() {
+        return trustService;
+    }
+
     public String getLocalPeerId() {
         return localPeerId;
     }
@@ -106,6 +118,7 @@ public class LinkEngine {
     public int getPort() {
         return port;
     }
+
     public DatabaseManager getDatabaseManager() {
         return dbManager;
     }
