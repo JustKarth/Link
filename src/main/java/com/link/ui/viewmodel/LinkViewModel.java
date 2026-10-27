@@ -121,6 +121,22 @@ public class LinkViewModel {
     /** Views register here; they are notified synchronously on the FX thread. */
     private final List<Runnable> listeners = new ArrayList<>();
 
+    /**
+     * Callback fired (on the FX thread) when a transfer enters PAIRING state
+     * and needs the user to compare a SAS code.
+     */
+    public interface PairingPromptListener {
+        /** @param transferId transfer UUID as a string
+         *  @param peerName   display name of the remote device
+         *  @param sasCode    six-digit SAS code to compare */
+        void onPairingRequired(String transferId, String peerName, String sasCode);
+    }
+
+    private final List<PairingPromptListener> pairingListeners = new ArrayList<>();
+
+    public void addPairingListener(PairingPromptListener l)    { pairingListeners.add(l); }
+    public void removePairingListener(PairingPromptListener l) { pairingListeners.remove(l); }
+
     // -------------------------------------------------------------------------
     // Background scheduler for discovery polling
     // -------------------------------------------------------------------------
@@ -701,15 +717,32 @@ public class LinkViewModel {
                     0.0,
                     System.currentTimeMillis()
             );
+            if (snapshot.sasCode() != null) dt.setSasCode(snapshot.sasCode());
             transfersById.put(id, dt);
         } else {
             // Update existing record.
             existing.setStatus(mapState(snapshot.state()));
+            if (snapshot.sasCode() != null) {
+                existing.setSasCode(snapshot.sasCode());
+            } else if (snapshot.state() != TransferState.PAIRING) {
+                existing.setSasCode(null); // clear once out of PAIRING
+            }
             if (snapshot.progress() != null) {
                 long total = snapshot.progress().totalBytes();
                 long done  = snapshot.progress().completedBytes();
                 existing.setProgress(total > 0 ? (double) done / total : 0.0);
                 existing.setSpeedBytesPerSecond(snapshot.progress().speedBytesPerSecond());
+            }
+        }
+
+        // Fire pairing prompt when entering PAIRING state with a SAS code.
+        if (snapshot.state() == TransferState.PAIRING && snapshot.sasCode() != null
+                && !pairingListeners.isEmpty()) {
+            String peerName = snapshot.peer() != null ? snapshot.peer().displayName() : "Unknown";
+            String code = snapshot.sasCode();
+            for (PairingPromptListener l : pairingListeners) {
+                try { l.onPairingRequired(id, peerName, code); }
+                catch (RuntimeException ignored) {}
             }
         }
 

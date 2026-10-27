@@ -1,7 +1,10 @@
 package com.link.ui.views;
 
 import com.link.ui.components.Icons;
+import com.link.ui.components.SasPairingDialog;
+import com.link.ui.demo.DemoTransfer;
 import com.link.ui.demo.DiscoveryState;
+import com.link.ui.demo.TransferStatus;
 import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
 import javafx.scene.Node;
@@ -14,6 +17,7 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -37,6 +41,9 @@ public class MainShell implements Navigator {
     private final Label footerStatus = new Label();
     private final Region footerDot = new Region();
 
+    /** Tracks transfer IDs that currently have an open SAS pairing dialog. */
+    private final Map<String, SasPairingDialog> openPairingDialogs = new HashMap<>();
+
     public MainShell(LinkViewModel state) {
         this.state = state;
         views.put(ViewKey.NEARBY, new NearbyView(state, this));
@@ -53,12 +60,32 @@ public class MainShell implements Navigator {
         // Global refresh: update the active view and sidebar status.
         state.addListener(this::onStateChanged);
 
+        // SAS pairing prompt — fired on the FX thread by LinkViewModel.
+        state.addPairingListener((transferId, peerName, sasCode) -> {
+            if (openPairingDialogs.containsKey(transferId)) return; // already open
+            SasPairingDialog dlg = new SasPairingDialog(
+                    root, state, transferId, peerName, sasCode,
+                    () -> openPairingDialogs.remove(transferId));
+            openPairingDialogs.put(transferId, dlg);
+            dlg.show();
+        });
+
         goTo(ViewKey.NEARBY);
     }
 
     private void onStateChanged() {
         views.get(active).refresh();
         updateSidebarStatus();
+        // Dismiss any open pairing dialogs whose transfer is now terminal.
+        if (!openPairingDialogs.isEmpty()) {
+            for (DemoTransfer dt : state.getTransfers()) {
+                SasPairingDialog dlg = openPairingDialogs.get(dt.getId());
+                if (dlg != null && dt.isTerminal()) {
+                    openPairingDialogs.remove(dt.getId());
+                    dlg.dismiss();
+                }
+            }
+        }
     }
 
     @Override public void goTo(ViewKey key) {
