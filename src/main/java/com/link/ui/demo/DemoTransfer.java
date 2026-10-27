@@ -24,6 +24,7 @@ public class DemoTransfer {
     private double progress;                // 0.0 .. 1.0
     private long speedBytesPerSecond;       // simulated throughput (0 when not active)
     private long completedAtMillis;         // 0 while not completed
+    private String sasCode;                 // non-null only while PAIRING state
 
     public DemoTransfer(String id, String fileName, long fileSize, String fileExtension,
                         TransferDirection direction, String deviceName,
@@ -58,6 +59,9 @@ public class DemoTransfer {
 
     public long getCompletedAtMillis() { return completedAtMillis; }
     public void setCompletedAtMillis(long t) { this.completedAtMillis = t; }
+    /** Non-null only when this transfer is in PAIRING state. */
+    public String getSasCode() { return sasCode; }
+    public void setSasCode(String code) { this.sasCode = code; }
 
     /** True when the transfer is in a state where progress can still change. */
     public boolean isTerminal() {
