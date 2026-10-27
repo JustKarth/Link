@@ -369,7 +369,7 @@ public class NearbyView implements View {
         new FileSelectionDialog(nav.overlayRoot(), state, sel, () -> {
             List<String> names = collectRecentFileNames();
             viz.triggerBeam(names);
-            PauseTransition delay = new PauseTransition(Duration.millis(1100));
+            PauseTransition delay = new PauseTransition(Duration.millis(2200));
             delay.setOnFinished(ev -> nav.goTo(ViewKey.TRANSFERS));
             delay.play();
         }).show();

@@ -323,8 +323,14 @@ public class FileSelectionDialog {
             return;
         }
 
+        // Register onSent as a post-close callback so it fires only AFTER the
+        // backdrop fade completes and is removed from the scene. This prevents
+        // the dimmed overlay from remaining visible over the Nearby radar while
+        // the beam animation plays.
+        if (modal != null) modal.setOnClose(onSent);
         close();
-        if (onSent != null) onSent.run();
+        // Do NOT call onSent here — it will be called by Modal once the
+        // backdrop has fully faded out (~120 ms from now).
     }
 
     // ---- Routing ----------------------------------------------------------
