@@ -18,5 +18,3 @@ public class TransferProtocolManager {
         return mapper.readValue(json, ControlMessage.class);
     }
 }
-
-}

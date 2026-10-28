@@ -544,5 +544,3 @@ public class FileTransferEngine {
         return offset;
     }
 }
-
-}
