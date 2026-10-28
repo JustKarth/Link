@@ -57,3 +57,9 @@ archive/
 
 explanation.md
 Link_DevDocs.pdf
+
+# Keystores and cryptographic identities
+*.p12
+*.jks
+*.keystore
+link_identity.p12
