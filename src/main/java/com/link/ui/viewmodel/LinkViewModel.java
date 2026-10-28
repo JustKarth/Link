@@ -35,10 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The ViewModel that bridges the real {@link LinkEngine} backend to the JavaFX
- * UI layer. It exposes the same observable surface as
- * {@link com.link.ui.prototype.PrototypeState} so that views can be migrated
- * from the prototype to the real backend without changing their own code —
- * only the object injected into them changes.
+ * UI layer.
  *
  * <h2>Threading contract</h2>
  * <ul>
@@ -48,13 +45,6 @@ import java.util.concurrent.atomic.AtomicLong;
  *       on background threads and are always marshalled to the FX thread via
  *       {@link Platform#runLater} before mutating UI-visible state.</li>
  * </ul>
- *
- * <h2>Data mapping</h2>
- * The UI layer consumes the demo POJOs ({@link DemoDevice}, {@link DemoTransfer},
- * {@link DemoActivity}) because those types are already wired into every view
- * and component. This ViewModel is responsible for converting real domain
- * objects ({@link Peer}, {@link TransferSession}) into those shapes, keeping
- * the views stable while the backend evolves.
  *
  * <h2>Lifecycle</h2>
  * <ol>
@@ -163,19 +153,26 @@ public class LinkViewModel {
      * @param port             TCP port the engine will listen on
      */
     public LinkViewModel(String localDisplayName, int port) {
-        this.engine = new LinkEngine(localDisplayName, port, transferObserver);
+        // SettingsModel loads the persisted display name from Java Preferences.
+        // Use the persisted name if available; fall back to the hostname passed in.
+        String effectiveName = settings.getDeviceDisplayName();
+        if (effectiveName == null || effectiveName.isBlank()) {
+            effectiveName = localDisplayName;
+            settings.setDeviceDisplayName(effectiveName);
+        }
+
+        this.engine = new LinkEngine(effectiveName, port, transferObserver);
         this.deviceRepository = new DeviceRepository(engine.getDatabaseManager());
 
-        // Build the "self" device entry from the same data given to the engine.
+        // Build the "self" device entry from the engine's actual display name.
         this.thisDevice = new DemoDevice(
                 "self",
-                localDisplayName,
+                effectiveName,
                 DeviceType.LAPTOP,   // TODO: detect real OS / device class
                 resolveLocalIp(),
                 System.getProperty("os.name", "Unknown OS"),
                 DeviceStatus.ONLINE
         );
-        this.settings.setDeviceDisplayName(localDisplayName);
     }
 
     // =========================================================================
@@ -231,7 +228,7 @@ public class LinkViewModel {
     }
 
     // =========================================================================
-    // Accessors — same surface as PrototypeState
+    // Accessors
     // =========================================================================
 
     /** Returns the representation of this local device shown in the UI. */
@@ -258,8 +255,8 @@ public class LinkViewModel {
     public SettingsModel getSettings() { return settings; }
 
     /**
-     * Always {@code false} for this class — distinguishes it from the
-     * prototype's {@code PrototypeState#isDemoMode()} which returns {@code true}.
+     * Always {@code false} — the app is connected to the real backend.
+     * Kept for source compatibility with any remaining view references.
      */
     public boolean isDemoMode() { return false; }
 
@@ -325,8 +322,6 @@ public class LinkViewModel {
     /**
      * Toggles discovery on/off. When toggled off the discovery state becomes
      * {@link DiscoveryState#PAUSED}; when toggled on a rescan is initiated.
-     *
-     * <p>Matches the {@code toggleDiscovery()} method on {@code PrototypeState}.
      */
     public void toggleDiscovery() {
         boolean enabled = settings.isMockDiscoveryEnabled();
@@ -342,8 +337,7 @@ public class LinkViewModel {
     }
 
     /**
-     * Explicitly enables or disables discovery. Used by the Settings screen
-     * toggle; matches {@code setDiscoveryEnabled(boolean)} on {@code PrototypeState}.
+     * Explicitly enables or disables discovery.
      */
     public void setDiscoveryEnabled(boolean enabled) {
         settings.setMockDiscoveryEnabled(enabled);
@@ -359,8 +353,6 @@ public class LinkViewModel {
      * Triggers a discovery rescan: sets state to {@link DiscoveryState#LOADING}
      * immediately, then resolves to {@link DiscoveryState#FOUND} or
      * {@link DiscoveryState#NONE_FOUND} on the next poll cycle.
-     *
-     * <p>Matches {@code rescan()} on {@code PrototypeState}.
      */
     public void rescan() {
         discoveryState = DiscoveryState.LOADING;
@@ -421,16 +413,7 @@ public class LinkViewModel {
 
     /**
      * Creates a real outgoing transfer request for each of the supplied files,
-     * targeting the given destination device. Returns a {@link SendResult} so
-     * the caller can distinguish success from specific failure modes and show
-     * an appropriate error instead of silently navigating away.
-     *
-     * <p>This replaces {@code PrototypeState#addOutgoingTransfers} with a real
-     * backend call to {@link com.link.application.TransferCoordinator#requestTransfer}.
-     *
-     * @param files       Files chosen by the user (null or non-file entries are skipped)
-     * @param destination The target peer device
-     * @return A {@link SendResult} describing the outcome
+     * targeting the given destination device.
      */
     public SendResult addOutgoingTransfers(List<? extends File> files, DemoDevice destination) {
         Objects.requireNonNull(destination, "destination");

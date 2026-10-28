@@ -1,48 +1,118 @@
 package com.link.ui.demo;
 
 import java.util.Objects;
+import java.util.prefs.Preferences;
 
 /**
- * In-memory prototype settings. The Settings screen reads and mutates this
- * object directly. Nothing here is persisted — settings reset when the
- * prototype restarts (documented in the README). A future backend can replace
- * this with a persisted preference store without touching the UI.
+ * Application settings, backed by Java {@link Preferences} so values survive
+ * restarts. Each setter immediately flushes to the backing store.
+ *
+ * <p>The preference node is per-user and scoped to this class, so settings
+ * are isolated from other applications on the same machine.
  */
 public class SettingsModel {
 
-    // --- General ----------------------------------------------------------
-    private String deviceDisplayName;
+    private static final String KEY_NAME          = "deviceDisplayName";
+    private static final String KEY_DISCOVERY      = "discoveryEnabled";
+    private static final String KEY_DISCOVERABLE   = "discoverable";
+    private static final String KEY_DOWNLOAD_DIR   = "downloadDestination";
+    private static final String KEY_REQUIRE_APPR   = "requireApproval";
+    private static final String KEY_NOTIFICATIONS  = "desktopNotifications";
 
-    // --- Discovery -------------------------------------------------------
-    private boolean mockDiscoveryEnabled = true;
-    private boolean discoverable = true;
+    private static final String DEFAULT_DOWNLOAD_DIR =
+            System.getProperty("user.home") + "/Downloads";
 
-    // --- Transfers -------------------------------------------------------
-    private String downloadDestination = System.getProperty("user.home") + "/Downloads";
-    private boolean requireApprovalForIncoming = true;
+    private final Preferences prefs =
+            Preferences.userNodeForPackage(SettingsModel.class);
 
-    // --- Notifications ----------------------------------------------------
-    private boolean desktopNotifications = true;
+    // ── Cached values (loaded once, mutated by setters) ───────────────────────
 
-    public String getDeviceDisplayName() { return deviceDisplayName; }
-    public void setDeviceDisplayName(String deviceDisplayName) {
-        this.deviceDisplayName = Objects.requireNonNullElse(deviceDisplayName, "This Device");
+    private String  deviceDisplayName;
+    private boolean mockDiscoveryEnabled;
+    private boolean discoverable;
+    private String  downloadDestination;
+    private boolean requireApprovalForIncoming;
+    private boolean desktopNotifications;
+
+    public SettingsModel() {
+        // Load from persistent store; fall back to sensible defaults.
+        deviceDisplayName           = prefs.get(KEY_NAME, resolveDefaultName());
+        mockDiscoveryEnabled        = prefs.getBoolean(KEY_DISCOVERY,     true);
+        discoverable                = prefs.getBoolean(KEY_DISCOVERABLE,  true);
+        downloadDestination         = prefs.get(KEY_DOWNLOAD_DIR, DEFAULT_DOWNLOAD_DIR);
+        requireApprovalForIncoming  = prefs.getBoolean(KEY_REQUIRE_APPR,  true);
+        desktopNotifications        = prefs.getBoolean(KEY_NOTIFICATIONS,  true);
     }
 
+    // ── General ───────────────────────────────────────────────────────────────
+
+    public String getDeviceDisplayName() { return deviceDisplayName; }
+
+    public void setDeviceDisplayName(String name) {
+        this.deviceDisplayName = Objects.requireNonNullElse(name, "This Device");
+        prefs.put(KEY_NAME, this.deviceDisplayName);
+        flush();
+    }
+
+    // ── Discovery ─────────────────────────────────────────────────────────────
+
     public boolean isMockDiscoveryEnabled() { return mockDiscoveryEnabled; }
-    public void setMockDiscoveryEnabled(boolean v) { this.mockDiscoveryEnabled = v; }
+
+    public void setMockDiscoveryEnabled(boolean v) {
+        this.mockDiscoveryEnabled = v;
+        prefs.putBoolean(KEY_DISCOVERY, v);
+        flush();
+    }
 
     public boolean isDiscoverable() { return discoverable; }
-    public void setDiscoverable(boolean v) { this.discoverable = v; }
+
+    public void setDiscoverable(boolean v) {
+        this.discoverable = v;
+        prefs.putBoolean(KEY_DISCOVERABLE, v);
+        flush();
+    }
+
+    // ── Transfers ─────────────────────────────────────────────────────────────
 
     public String getDownloadDestination() { return downloadDestination; }
+
     public void setDownloadDestination(String v) {
-        this.downloadDestination = (v == null || v.isBlank()) ? downloadDestination : v;
+        if (v != null && !v.isBlank()) {
+            this.downloadDestination = v;
+            prefs.put(KEY_DOWNLOAD_DIR, v);
+            flush();
+        }
     }
 
     public boolean isRequireApprovalForIncoming() { return requireApprovalForIncoming; }
-    public void setRequireApprovalForIncoming(boolean v) { this.requireApprovalForIncoming = v; }
+
+    public void setRequireApprovalForIncoming(boolean v) {
+        this.requireApprovalForIncoming = v;
+        prefs.putBoolean(KEY_REQUIRE_APPR, v);
+        flush();
+    }
+
+    // ── Notifications ─────────────────────────────────────────────────────────
 
     public boolean isDesktopNotifications() { return desktopNotifications; }
-    public void setDesktopNotifications(boolean v) { this.desktopNotifications = v; }
+
+    public void setDesktopNotifications(boolean v) {
+        this.desktopNotifications = v;
+        prefs.putBoolean(KEY_NOTIFICATIONS, v);
+        flush();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static String resolveDefaultName() {
+        try {
+            return java.net.InetAddress.getLocalHost().getHostName();
+        } catch (java.net.UnknownHostException e) {
+            return System.getProperty("user.name", "This Device") + "'s Device";
+        }
+    }
+
+    private void flush() {
+        try { prefs.flush(); } catch (Exception ignored) {}
+    }
 }
