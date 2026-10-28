@@ -56,6 +56,7 @@ public class FileTransferEngine {
     public void initiateTransfer(UUID transferId, PeerId peerId, List<Path> sourcePaths) {
         transferPool.submit(() -> {
             String summaryName = sourcePaths.size() == 1 ? sourcePaths.get(0).getFileName().toString() : sourcePaths.size() + " files";
+            SecureSession session = null;
             
             try {
                 final Peer targetPeer = discoveryService.getDiscoveredPeers().stream()
@@ -64,35 +65,47 @@ public class FileTransferEngine {
 
                 publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.VERIFYING, new TransferProgress(0, 0, 0), null);
 
-                SecureSession session = connectionManager.connect(targetPeer);
+                session = connectionManager.connect(targetPeer);
                 
-                // --- SECURITY HANDSHAKE ---
                 String peerFingerprint = session.getRemoteFingerprint();
 
                 if (!trustService.isPeerTrusted(targetPeer.id().toString(), peerFingerprint)) {
                     String sasCode = session.getSasPairingCode();
-                    
-                    // Save state and pause thread
                     repository.addPendingOutgoing(transferId, new SessionRepository.OutgoingPendingState(targetPeer, session, sourcePaths, peerFingerprint));
-                    
-                    // Publish PAIRING state with the SAS code (assuming you added it to publisher args)
                     publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.PAIRING, new TransferProgress(0, 0, 0), null, sasCode);
-                    return; // Exit thread. Engine is now paused.
+                    return; 
                 }
 
-                // If already trusted, proceed immediately
                 proceedWithOutgoingTransfer(transferId, targetPeer, session, sourcePaths);
 
             } catch (Exception e) {
-                publisher.publish(transferId, summaryName, TransferDirection.SENDING, null, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
-                cleanupSession(transferId);
-            }
+        System.err.println(
+            "[Link] Outgoing setup failed. Transfer=" + transferId
+            + ", peer=" + peerId.value()
+        );
+        e.printStackTrace(System.err);
+
+        if (session != null) {
+            session.close();
+        }
+
+        publisher.publish(
+            transferId,
+            summaryName,
+            TransferDirection.SENDING,
+            null,
+            TransferState.FAILED,
+            new TransferProgress(0, 0, 0),
+            e.getMessage()
+        );
+
+        cleanupSession(transferId);
+    }
         });
     }
 
     public void confirmPairing(UUID transferId, boolean accepted) {
         transferPool.submit(() -> {
-            // Check Outgoing
             SessionRepository.OutgoingPendingState pendingOut = repository.getAndRemovePendingOutgoing(transferId);
             if (pendingOut != null) {
                 if (accepted) {
@@ -105,7 +118,6 @@ public class FileTransferEngine {
                 return;
             }
 
-            // Check Incoming
             SessionRepository.IncomingPendingState pendingIn = repository.getAndRemovePendingIncoming(transferId);
             if (pendingIn != null) {
                 if (accepted) {
@@ -132,29 +144,27 @@ public class FileTransferEngine {
                 if ("TRANSFER_REQUEST".equals(request.type())) {
                     UUID transferId = UUID.fromString(request.transferId());
                     
-                    // --- SECURITY HANDSHAKE ---
                     String peerFingerprint = session.getRemoteFingerprint();
                     String senderId = request.senderId();
 
                     if (!trustService.isPeerTrusted(senderId, peerFingerprint)) {
                         String sasCode = session.getSasPairingCode();
                         
-                        // Save state and pause thread
                         repository.addPendingIncoming(transferId, new SessionRepository.IncomingPendingState(request, session, peerFingerprint));
                         
                         Peer senderPeer = new Peer(new PeerId(senderId), request.senderDisplayName(), "", false);
                         
-                        // Publish PAIRING state with the SAS code
                         publisher.publish(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.PAIRING, new TransferProgress(0, 0, 0), null, sasCode);
-                        return; // Exit thread. Engine is now paused.
+                        return; 
                     }
 
-                    // If already trusted, proceed immediately
                     proceedWithIncomingTransfer(transferId, request, session);
                 }
             } catch (Exception e) {
-                session.close();
-            }
+    System.err.println("[Link] Incoming session failed.");
+    e.printStackTrace(System.err);
+    session.close();
+}
         });
     }
 
@@ -249,8 +259,6 @@ public class FileTransferEngine {
 
             repository.addSession(transferId, session);
 
-            // Create a pause handle so pauseTransfer()/resumeTransfer() can
-            // signal the sender thread mid-stream.
             SessionRepository.PauseHandle pauseHandle = repository.createPauseHandle(transferId);
             
             ControlMessage request = new ControlMessage("TRANSFER_REQUEST", transferId.toString(), summaryName, totalBatchBytes, fileManifest, localPeerId, localDisplayName, null, 0);
@@ -285,45 +293,31 @@ public class FileTransferEngine {
         }
     }
 
-    /**
-     * Pauses an active outgoing transfer. The sender thread will stop sending
-     * after the current chunk completes and block until {@link #resumeTransfer}
-     * is called. On the receiver side the socket stays open and the receive
-     * loop simply blocks on the next {@code receiveData()} call — no extra
-     * signaling needed on that side.
-     *
-     * <p>Only affects outgoing (sender-side) transfers; incoming transfers
-     * are paused implicitly because no data arrives.
-     */
     public void pauseTransfer(UUID transferId) {
         SessionRepository.PauseHandle handle = repository.getPauseHandle(transferId);
         if (handle == null || handle.isPaused()) return;
 
         handle.pause();
 
-        // Publish PAUSED with null progress so the observer preserves the
-        // current progress value rather than resetting it to zero.
         publisher.publish(transferId, null, TransferDirection.SENDING, null,
                 TransferState.PAUSED, null, null);
     }
 
-    /**
-     * Resumes a previously paused outgoing transfer. The blocked sender thread
-     * is released and data flow restarts from where it stopped.
-     */
     public void resumeTransfer(UUID transferId) {
         SessionRepository.PauseHandle handle = repository.getPauseHandle(transferId);
         if (handle == null || !handle.isPaused()) return;
 
         handle.resume();
 
-        // Publish TRANSFERRING with null progress — actual progress will be
-        // updated by the next publishThrottled call from sendFiles().
         publisher.publish(transferId, null, TransferDirection.SENDING, null,
                 TransferState.TRANSFERRING, null, null);
     }
 
     private void cleanupSession(UUID transferId) {
+        SecureSession session = repository.getSession(transferId);
+        if (session != null) {
+            session.close();
+        }
         repository.clear(transferId);
         publisher.cleanup(transferId);
     }
