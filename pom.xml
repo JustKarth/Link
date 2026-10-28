@@ -87,6 +87,9 @@
                 <version>0.0.8</version>
                 <configuration>
                 <mainClass>com.link.ui.LinkUIApplication</mainClass>
+                <options>
+                    <option>-Djavax.net.debug=ssl,handshake</option>
+                </options>
                 </configuration>
                 </plugin>
         </plugins>

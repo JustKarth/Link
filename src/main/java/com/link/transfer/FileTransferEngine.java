@@ -79,12 +79,28 @@ public class FileTransferEngine {
                 proceedWithOutgoingTransfer(transferId, targetPeer, session, sourcePaths);
 
             } catch (Exception e) {
-                if (session != null) {
-                    session.close();
-                }
-                publisher.publish(transferId, summaryName, TransferDirection.SENDING, null, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
-                cleanupSession(transferId);
-            }
+        System.err.println(
+            "[Link] Outgoing setup failed. Transfer=" + transferId
+            + ", peer=" + peerId.value()
+        );
+        e.printStackTrace(System.err);
+
+        if (session != null) {
+            session.close();
+        }
+
+        publisher.publish(
+            transferId,
+            summaryName,
+            TransferDirection.SENDING,
+            null,
+            TransferState.FAILED,
+            new TransferProgress(0, 0, 0),
+            e.getMessage()
+        );
+
+        cleanupSession(transferId);
+    }
         });
     }
 
@@ -145,8 +161,10 @@ public class FileTransferEngine {
                     proceedWithIncomingTransfer(transferId, request, session);
                 }
             } catch (Exception e) {
-                session.close();
-            }
+    System.err.println("[Link] Incoming session failed.");
+    e.printStackTrace(System.err);
+    session.close();
+}
         });
     }
 
