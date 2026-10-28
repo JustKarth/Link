@@ -35,11 +35,6 @@ public class DefaultConnectionManager implements ConnectionManager {
 
     @Override
     public void listen() {
-        // ── Synchronous bind ──
-        // The server socket is created and bound on the calling thread so that
-        // by the time listen() returns, the port is guaranteed to be open.
-        // This eliminates the race where UDP discovery advertises the service
-        // before the TCP listener is ready.
         try {
             SSLServerSocketFactory ssf = SslContextFactory.getSSLContext().getServerSocketFactory();
             serverSocket = ssf.createServerSocket(port);
@@ -54,41 +49,44 @@ public class DefaultConnectionManager implements ConnectionManager {
             throw new RuntimeException("Failed to bind TLS server socket on port " + port, e);
         }
 
-        // ── Asynchronous accept loop ──
         isRunning = true;
         Thread acceptThread = new Thread(() -> {
             while (isRunning) {
-                Socket clientSocket = null;
                 try {
-                    clientSocket = serverSocket.accept();
+                    Socket clientSocket = serverSocket.accept();
 
-                    if (clientSocket instanceof SSLSocket sslSocket) {
-                        sslSocket.setUseClientMode(false);
-                        sslSocket.setNeedClientAuth(true);
+                    // Offload handshake and authentication to a separate thread to prevent blocking the listener
+                    new Thread(() -> {
+                        try {
+                            if (clientSocket instanceof SSLSocket sslSocket) {
+                                sslSocket.setUseClientMode(false);
+                                sslSocket.setNeedClientAuth(true);
 
-                        SSLParameters params = sslSocket.getSSLParameters();
-                        params.setEndpointIdentificationAlgorithm(null);
-                        sslSocket.setSSLParameters(params);
+                                SSLParameters params = sslSocket.getSSLParameters();
+                                params.setEndpointIdentificationAlgorithm(null);
+                                sslSocket.setSSLParameters(params);
 
-                        sslSocket.startHandshake();
-                    }
+                                sslSocket.startHandshake();
+                            }
 
-                    DefaultSecureSession session = new DefaultSecureSession(clientSocket, trustService);
-                    session.authenticatePeer();
+                            DefaultSecureSession session = new DefaultSecureSession(clientSocket, trustService);
+                            session.authenticatePeer();
 
-                    if (incomingSessionHandler != null) {
-                        incomingSessionHandler.accept(session);
-                    }
+                            if (incomingSessionHandler != null) {
+                                incomingSessionHandler.accept(session);
+                            }
+
+                        } catch (Exception e) {
+                            if (isRunning) {
+                                LOG.log(Level.WARNING, "Incoming connection failed during handshake, dropping peer", e);
+                            }
+                            try { clientSocket.close(); } catch (IOException ignored) {}
+                        }
+                    }, "Link-IncomingHandshake").start();
 
                 } catch (Exception e) {
-                    // A single bad peer (network blip, malformed handshake, auth
-                    // failure) must not kill the listener.  Log and continue.
                     if (isRunning) {
-                        LOG.log(Level.WARNING, "Incoming connection failed, continuing to listen", e);
-                    }
-                    // Clean up the failed socket so we don't leak file descriptors.
-                    if (clientSocket != null) {
-                        try { clientSocket.close(); } catch (IOException ignored) {}
+                        LOG.log(Level.WARNING, "Socket accept failed, continuing to listen", e);
                     }
                 }
             }
@@ -100,9 +98,44 @@ public class DefaultConnectionManager implements ConnectionManager {
     @Override
     public SecureSession connect(com.link.domain.Peer peer) {
         try {
-            String[] parts = peer.candidateAddress().split(":");
-            String ip = parts[0];
-            int peerPort = parts.length > 1 ? Integer.parseInt(parts[1]) : port;
+            String address = peer.candidateAddress();
+            String ip;
+            int peerPort;
+
+            if (address.startsWith("[")) {
+                int closeBracket = address.indexOf(']');
+                if (closeBracket == -1) {
+                    throw new IllegalArgumentException("Malformed IPv6 address (missing ']'): " + address);
+                }
+                ip = address.substring(1, closeBracket); 
+                if (closeBracket + 1 < address.length() && address.charAt(closeBracket + 1) == ':') {
+                    peerPort = Integer.parseInt(address.substring(closeBracket + 2));
+                } else {
+                    peerPort = port; 
+                }
+            } else {
+                long colonCount = address.chars().filter(c -> c == ':').count();
+                if (colonCount > 1) {
+                    int lastColon = address.lastIndexOf(':');
+                    String afterColon = address.substring(lastColon + 1);
+                    if (!afterColon.isEmpty() && afterColon.chars().allMatch(Character::isDigit)) {
+                        ip = address.substring(0, lastColon);
+                        peerPort = Integer.parseInt(afterColon);
+                    } else {
+                        ip = address;
+                        peerPort = port;
+                    }
+                } else {
+                    int lastColon = address.lastIndexOf(':');
+                    if (lastColon != -1) {
+                        ip = address.substring(0, lastColon);
+                        peerPort = Integer.parseInt(address.substring(lastColon + 1));
+                    } else {
+                        ip = address;
+                        peerPort = port;
+                    }
+                }
+            }
 
             SSLSocketFactory ssf = SslContextFactory.getSSLContext().getSocketFactory();
             SSLSocket socket = (SSLSocket) ssf.createSocket(ip, peerPort);
