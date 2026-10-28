@@ -134,5 +134,3 @@ public class DefaultConnectionManager implements ConnectionManager {
         } catch (IOException ignored) {}
     }
 }
-
-}
