@@ -80,6 +80,7 @@ public class DefaultConnectionManager implements ConnectionManager {
             return session;
 
         } catch (Exception e) {
+            e.printStackTrace();
             throw new RuntimeException("Failed to connect to peer: " + peer.displayName(), e);
         }
     }
