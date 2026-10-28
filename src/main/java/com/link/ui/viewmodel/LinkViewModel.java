@@ -753,6 +753,12 @@ public class LinkViewModel {
                 existing.setProgress(total > 0 ? (double) done / total : 0.0);
                 existing.setSpeedBytesPerSecond(snapshot.progress().speedBytesPerSecond());
             }
+            // Always zero the speed when paused or resuming (before the first
+            // real TRANSFERRING progress event arrives) so the card doesn't
+            // show a stale speed while idle.
+            if (snapshot.state() == TransferState.PAUSED) {
+                existing.setSpeedBytesPerSecond(0);
+            }
         }
 
         // Fire pairing prompt when entering PAIRING state with a SAS code.

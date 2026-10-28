@@ -301,16 +301,10 @@ public class FileTransferEngine {
 
         handle.pause();
 
-        // Reflect the PAUSED state in the UI via the publisher.
-        IncomingBatchState batch = repository.getBatch(transferId);
-        String summaryName = batch != null
-                ? (batch.files().size() == 1 ? batch.files().get(0).fileName() : batch.files().size() + " files")
-                : "Transfer";
-        // Peer info is carried in the batch for incoming; for outgoing we
-        // publish with a null peer — the observer already has the peer from
-        // previous TRANSFERRING events.
-        publisher.publish(transferId, summaryName, TransferDirection.SENDING, null,
-                TransferState.PAUSED, new TransferProgress(0, 0, 0), null);
+        // Publish PAUSED with null progress so the observer preserves the
+        // current progress value rather than resetting it to zero.
+        publisher.publish(transferId, null, TransferDirection.SENDING, null,
+                TransferState.PAUSED, null, null);
     }
 
     /**
@@ -323,12 +317,10 @@ public class FileTransferEngine {
 
         handle.resume();
 
-        IncomingBatchState batch = repository.getBatch(transferId);
-        String summaryName = batch != null
-                ? (batch.files().size() == 1 ? batch.files().get(0).fileName() : batch.files().size() + " files")
-                : "Transfer";
-        publisher.publish(transferId, summaryName, TransferDirection.SENDING, null,
-                TransferState.TRANSFERRING, new TransferProgress(0, 0, 0), null);
+        // Publish TRANSFERRING with null progress — actual progress will be
+        // updated by the next publishThrottled call from sendFiles().
+        publisher.publish(transferId, null, TransferDirection.SENDING, null,
+                TransferState.TRANSFERRING, null, null);
     }
 
     private void cleanupSession(UUID transferId) {

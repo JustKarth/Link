@@ -163,12 +163,16 @@ public class TransferCard extends VBox {
 
             switch (t.getStatus()) {
                 case IN_PROGRESS -> {
-                    controls.getChildren().addAll(
-                            iconBtn(Icons.pause(15, Theme.TEXT_2),
-                                    () -> state.pauseTransfer(transferId)),
+                    // Pause only makes sense on the sender side — the receiver has
+                    // no control over data flow from its end.
+                    if (t.getDirection() == TransferDirection.OUTGOING) {
+                        controls.getChildren().add(
+                                iconBtn(Icons.pause(15, Theme.TEXT_2),
+                                        () -> state.pauseTransfer(transferId)));
+                    }
+                    controls.getChildren().add(
                             iconBtn(Icons.cancel(15, Theme.TEXT_2),
-                                    () -> state.cancelTransfer(transferId))
-                    );
+                                    () -> state.cancelTransfer(transferId)));
                     showControls = true;
                 }
                 case PAUSED -> {
