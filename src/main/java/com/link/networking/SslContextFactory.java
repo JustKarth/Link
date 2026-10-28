@@ -3,6 +3,9 @@ package com.link.networking;
 import javax.net.ssl.*;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.cert.CertificateFactory;
@@ -11,26 +14,50 @@ import java.util.Date;
 
 public class SslContextFactory {
 
+    /** PKCS12 keystore that persists the local identity across restarts. */
+    private static final String KEYSTORE_PATH = "link_identity.p12";
+    private static final char[] KEYSTORE_PASS = "link-p2p".toCharArray();
+    private static final String KEY_ALIAS     = "link-peer";
+
     private static SSLContext sslContext;
     private static X509Certificate localCert;
 
     public static synchronized SSLContext getSSLContext() {
         if (sslContext == null) {
             try {
-                KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
-                keyGen.initialize(2048);
-                KeyPair keyPair = keyGen.generateKeyPair();
+                // Load or generate a persistent keypair so the TLS fingerprint
+                // stays the same across JVM restarts. Without this, every restart
+                // produces a new fingerprint and isPeerTrusted() throws a
+                // SecurityException("POSSIBLE MITM ATTACK") for every previously
+                // trusted peer, causing all transfers to fail immediately.
+                KeyStore keyStore = KeyStore.getInstance("PKCS12");
+                File ksFile = new File(KEYSTORE_PATH);
 
-                localCert = generateSelfSignedCertificate(keyPair);
+                if (ksFile.exists()) {
+                    // Load the existing identity from disk.
+                    try (FileInputStream fis = new FileInputStream(ksFile)) {
+                        keyStore.load(fis, KEYSTORE_PASS);
+                    }
+                    localCert = (X509Certificate) keyStore.getCertificate(KEY_ALIAS);
+                } else {
+                    // First run: generate a new keypair and persist it.
+                    KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+                    keyGen.initialize(2048);
+                    KeyPair keyPair = keyGen.generateKeyPair();
 
-                KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-                keyStore.load(null, null);
+                    localCert = generateSelfSignedCertificate(keyPair);
 
-                keyStore.setKeyEntry("link-peer", keyPair.getPrivate(), "pass".toCharArray(),
-                        new java.security.cert.Certificate[]{localCert});
+                    keyStore.load(null, null);
+                    keyStore.setKeyEntry(KEY_ALIAS, keyPair.getPrivate(), KEYSTORE_PASS,
+                            new java.security.cert.Certificate[]{localCert});
+
+                    try (FileOutputStream fos = new FileOutputStream(ksFile)) {
+                        keyStore.store(fos, KEYSTORE_PASS);
+                    }
+                }
 
                 KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-                kmf.init(keyStore, "pass".toCharArray());
+                kmf.init(keyStore, KEYSTORE_PASS);
 
                 TrustManager[] trustAllCerts = new TrustManager[]{
                     new X509TrustManager() {

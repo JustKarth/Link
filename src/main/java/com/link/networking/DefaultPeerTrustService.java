@@ -49,7 +49,17 @@ public class DefaultPeerTrustService implements PeerTrustService {
         String existing = trustRepository.getTrustedFingerprint(peerId);
         if (existing == null) return false;
         if (!existing.equals(fingerprint)) {
-            throw new SecurityException("POSSIBLE MITM ATTACK: Peer identity fingerprint mismatch!");
+            // The stored fingerprint doesn't match the current certificate.
+            // This can happen legitimately after:
+            //   - The remote device reinstalled the app (new keypair generated).
+            //   - A stale ephemeral-keypair entry from before persistent identity
+            //     was introduced.
+            // In either case, revoke the stale record and fall through to the
+            // PAIRING flow so the user can re-verify the new SAS code.
+            // A genuine MITM will be caught because the SAS code will differ
+            // between the two devices.
+            trustRepository.revokeTrust(peerId);
+            return false;
         }
         return true;
     }

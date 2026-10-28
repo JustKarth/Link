@@ -248,6 +248,10 @@ public class FileTransferEngine {
             long totalBatchBytes = fileManifest.stream().mapToLong(FileInfo::fileSize).sum();
 
             repository.addSession(transferId, session);
+
+            // Create a pause handle so pauseTransfer()/resumeTransfer() can
+            // signal the sender thread mid-stream.
+            SessionRepository.PauseHandle pauseHandle = repository.createPauseHandle(transferId);
             
             ControlMessage request = new ControlMessage("TRANSFER_REQUEST", transferId.toString(), summaryName, totalBatchBytes, fileManifest, localPeerId, localDisplayName, null, 0);
             protocolManager.sendMessage(session, request);
@@ -260,7 +264,7 @@ public class FileTransferEngine {
 
                 long startTime = System.currentTimeMillis();
                 
-                streamWorker.sendFiles(session, sourcePaths, resumeOffset, (bytesSent) -> {
+                streamWorker.sendFiles(session, sourcePaths, resumeOffset, pauseHandle, (bytesSent) -> {
                     long speed = calculateSpeed(startTime, bytesSent);
                     publisher.publishThrottled(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.TRANSFERRING, new TransferProgress(totalBatchBytes, bytesSent, speed));
                 });
@@ -271,11 +275,52 @@ public class FileTransferEngine {
             } else if ("TRANSFER_REJECTED".equals(response.type())) {
                 publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(totalBatchBytes, 0, 0), "Peer rejected transfer");
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.CANCELLED, new TransferProgress(0, 0, 0), "Transfer interrupted");
         } catch (Exception e) {
             publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.FAILED, new TransferProgress(0, 0, 0), e.getMessage());
         } finally {
             cleanupSession(transferId);
         }
+    }
+
+    /**
+     * Pauses an active outgoing transfer. The sender thread will stop sending
+     * after the current chunk completes and block until {@link #resumeTransfer}
+     * is called. On the receiver side the socket stays open and the receive
+     * loop simply blocks on the next {@code receiveData()} call — no extra
+     * signaling needed on that side.
+     *
+     * <p>Only affects outgoing (sender-side) transfers; incoming transfers
+     * are paused implicitly because no data arrives.
+     */
+    public void pauseTransfer(UUID transferId) {
+        SessionRepository.PauseHandle handle = repository.getPauseHandle(transferId);
+        if (handle == null || handle.isPaused()) return;
+
+        handle.pause();
+
+        // Publish PAUSED with null progress so the observer preserves the
+        // current progress value rather than resetting it to zero.
+        publisher.publish(transferId, null, TransferDirection.SENDING, null,
+                TransferState.PAUSED, null, null);
+    }
+
+    /**
+     * Resumes a previously paused outgoing transfer. The blocked sender thread
+     * is released and data flow restarts from where it stopped.
+     */
+    public void resumeTransfer(UUID transferId) {
+        SessionRepository.PauseHandle handle = repository.getPauseHandle(transferId);
+        if (handle == null || !handle.isPaused()) return;
+
+        handle.resume();
+
+        // Publish TRANSFERRING with null progress — actual progress will be
+        // updated by the next publishThrottled call from sendFiles().
+        publisher.publish(transferId, null, TransferDirection.SENDING, null,
+                TransferState.TRANSFERRING, null, null);
     }
 
     private void cleanupSession(UUID transferId) {

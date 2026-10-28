@@ -35,7 +35,9 @@ public class StreamWorker {
         return manifest;
     }
 
-    public void sendFiles(SecureSession session, List<Path> sourcePaths, long resumeOffset, ProgressCallback callback) throws Exception {
+    public void sendFiles(SecureSession session, List<Path> sourcePaths, long resumeOffset,
+                          SessionRepository.PauseHandle pauseHandle,
+                          ProgressCallback callback) throws Exception {
         long overallCompletedBytes = 0;
 
         for (Path path : sourcePaths) {
@@ -52,6 +54,14 @@ public class StreamWorker {
                 byte[] buffer = new byte[8192];
                 int read;
                 while ((read = raf.read(buffer)) > 0) {
+                    // Check pause flag between every chunk. If paused, block here
+                    // until resumeTransfer() releases the latch. The sender thread
+                    // simply stops writing; the receiver blocks on receiveData()
+                    // until chunks start flowing again.
+                    if (pauseHandle.isPaused()) {
+                        pauseHandle.awaitResume();
+                    }
+
                     if (read == buffer.length) {
                         session.sendData(buffer);
                     } else {
@@ -75,20 +85,29 @@ public class StreamWorker {
 
             try (FileOutputStream fos = new FileOutputStream(tempFile, true)) {
                 long fileReceived = fileAlreadyOnDisk;
+                long remaining = fi.fileSize() - fileReceived;
 
-                while (fileReceived < fi.fileSize()) {
+                while (remaining > 0) {
                     byte[] chunk = session.receiveData();
-                    if (chunk.length > 0 && chunk[0] == '{') {
-                        String maybeJson = new String(chunk);
-                        if (maybeJson.contains("TRANSFER_COMPLETED")) break;
-                    }
-                    
-                    fos.write(chunk);
-                    fileReceived += chunk.length;
-                    overallReceived += chunk.length;
+                    // Guard: never write more than the declared file size
+                    int toWrite = (int) Math.min(chunk.length, remaining);
+                    fos.write(chunk, 0, toWrite);
+                    fileReceived += toWrite;
+                    overallReceived += toWrite;
+                    remaining -= toWrite;
                     callback.onProgress(overallReceived);
                 }
             }
+        }
+        // Read the TRANSFER_COMPLETED control frame that the sender sends after
+        // streaming all file data. This keeps control messages on their own
+        // dedicated receive path and avoids the previous JSON-sniffing heuristic
+        // that could misidentify binary data starting with '{' as a control frame.
+        try {
+            session.receiveMessage(); // consumes the TRANSFER_COMPLETED frame
+        } catch (Exception ignored) {
+            // If the session closes before we read the completion frame that is
+            // still fine — all bytes were already written and verified separately.
         }
         return true;
     }

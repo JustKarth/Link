@@ -2,7 +2,6 @@ package com.link.ui.views;
 
 import com.link.ui.components.Icons;
 import com.link.ui.components.ToggleSwitch;
-import com.link.ui.demo.DemoDataFactory;
 import com.link.ui.demo.DemoDevice;
 import com.link.ui.viewmodel.LinkViewModel;
 import com.link.ui.theme.Theme;
@@ -27,8 +26,7 @@ import java.nio.file.Path;
 /**
  * Settings screen. Four grouped sections (General, Discovery, Transfers,
  * Notifications) with toggles, a text field and a directory chooser. All
- * values live in {@link PrototypeState}'s in-memory settings; nothing is
- * persisted — settings reset on restart (documented in the README).
+ * values are persisted across restarts via {@link com.link.ui.demo.SettingsModel}.
  */
 public class SettingsView implements View {
 
@@ -291,7 +289,7 @@ public class SettingsView implements View {
         DemoDevice self = state.getThisDevice();
         selfInfoLabel.setText(self.getName() + " · " + self.getOsLabel() + " · " + self.getIpAddress());
         selfInfoLabel.getStyleClass().setAll("device-meta");
-        versionLabel.setText(DemoDataFactory.appVersion());
+        versionLabel.setText("1.0.0");
         versionLabel.getStyleClass().setAll("device-meta");
 
         if (!deviceName.isFocused()) {
@@ -313,7 +311,7 @@ public class SettingsView implements View {
     }
 
     @Override public String title() { return "Settings"; }
-    @Override public String subtitle() { return "In-memory preferences. Changes are not persisted between launches."; }
+    @Override public String subtitle() { return "Preferences are saved automatically."; }
 
     public Pane root() { return root; }
 

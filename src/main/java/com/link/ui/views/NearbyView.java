@@ -151,7 +151,7 @@ public class NearbyView implements View {
         panel.getChildren().addAll(header, vizBox, destPanel, receiveStrip);
 
         // ── Status bar ────────────────────────────────────────────────────────
-        Label leftStatus = new Label("SOCKET PORT: 8080   HAPTIC PROXIMITY: ENABLED");
+        Label leftStatus = new Label("SOCKET PORT: 8080   ·   UDP DISCOVERY: ENABLED");
         leftStatus.setStyle("-fx-font-size: 9.5; -fx-font-weight: 600;"
                 + "-fx-text-fill: #94a3b8; -fx-letter-spacing: 0.8;");
         statusBar.setStyle("-fx-font-size: 9.5; -fx-font-weight: 700;"

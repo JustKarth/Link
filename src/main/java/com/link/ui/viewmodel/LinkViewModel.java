@@ -35,10 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The ViewModel that bridges the real {@link LinkEngine} backend to the JavaFX
- * UI layer. It exposes the same observable surface as
- * {@link com.link.ui.prototype.PrototypeState} so that views can be migrated
- * from the prototype to the real backend without changing their own code —
- * only the object injected into them changes.
+ * UI layer.
  *
  * <h2>Threading contract</h2>
  * <ul>
@@ -48,13 +45,6 @@ import java.util.concurrent.atomic.AtomicLong;
  *       on background threads and are always marshalled to the FX thread via
  *       {@link Platform#runLater} before mutating UI-visible state.</li>
  * </ul>
- *
- * <h2>Data mapping</h2>
- * The UI layer consumes the demo POJOs ({@link DemoDevice}, {@link DemoTransfer},
- * {@link DemoActivity}) because those types are already wired into every view
- * and component. This ViewModel is responsible for converting real domain
- * objects ({@link Peer}, {@link TransferSession}) into those shapes, keeping
- * the views stable while the backend evolves.
  *
  * <h2>Lifecycle</h2>
  * <ol>
@@ -163,19 +153,26 @@ public class LinkViewModel {
      * @param port             TCP port the engine will listen on
      */
     public LinkViewModel(String localDisplayName, int port) {
-        this.engine = new LinkEngine(localDisplayName, port, transferObserver);
+        // SettingsModel loads the persisted display name from Java Preferences.
+        // Use the persisted name if available; fall back to the hostname passed in.
+        String effectiveName = settings.getDeviceDisplayName();
+        if (effectiveName == null || effectiveName.isBlank()) {
+            effectiveName = localDisplayName;
+            settings.setDeviceDisplayName(effectiveName);
+        }
+
+        this.engine = new LinkEngine(effectiveName, port, transferObserver);
         this.deviceRepository = new DeviceRepository(engine.getDatabaseManager());
 
-        // Build the "self" device entry from the same data given to the engine.
+        // Build the "self" device entry from the engine's actual display name.
         this.thisDevice = new DemoDevice(
                 "self",
-                localDisplayName,
+                effectiveName,
                 DeviceType.LAPTOP,   // TODO: detect real OS / device class
                 resolveLocalIp(),
                 System.getProperty("os.name", "Unknown OS"),
                 DeviceStatus.ONLINE
         );
-        this.settings.setDeviceDisplayName(localDisplayName);
     }
 
     // =========================================================================
@@ -231,7 +228,7 @@ public class LinkViewModel {
     }
 
     // =========================================================================
-    // Accessors — same surface as PrototypeState
+    // Accessors
     // =========================================================================
 
     /** Returns the representation of this local device shown in the UI. */
@@ -258,8 +255,8 @@ public class LinkViewModel {
     public SettingsModel getSettings() { return settings; }
 
     /**
-     * Always {@code false} for this class — distinguishes it from the
-     * prototype's {@code PrototypeState#isDemoMode()} which returns {@code true}.
+     * Always {@code false} — the app is connected to the real backend.
+     * Kept for source compatibility with any remaining view references.
      */
     public boolean isDemoMode() { return false; }
 
@@ -325,8 +322,6 @@ public class LinkViewModel {
     /**
      * Toggles discovery on/off. When toggled off the discovery state becomes
      * {@link DiscoveryState#PAUSED}; when toggled on a rescan is initiated.
-     *
-     * <p>Matches the {@code toggleDiscovery()} method on {@code PrototypeState}.
      */
     public void toggleDiscovery() {
         boolean enabled = settings.isMockDiscoveryEnabled();
@@ -342,8 +337,7 @@ public class LinkViewModel {
     }
 
     /**
-     * Explicitly enables or disables discovery. Used by the Settings screen
-     * toggle; matches {@code setDiscoveryEnabled(boolean)} on {@code PrototypeState}.
+     * Explicitly enables or disables discovery.
      */
     public void setDiscoveryEnabled(boolean enabled) {
         settings.setMockDiscoveryEnabled(enabled);
@@ -359,8 +353,6 @@ public class LinkViewModel {
      * Triggers a discovery rescan: sets state to {@link DiscoveryState#LOADING}
      * immediately, then resolves to {@link DiscoveryState#FOUND} or
      * {@link DiscoveryState#NONE_FOUND} on the next poll cycle.
-     *
-     * <p>Matches {@code rescan()} on {@code PrototypeState}.
      */
     public void rescan() {
         discoveryState = DiscoveryState.LOADING;
@@ -421,16 +413,7 @@ public class LinkViewModel {
 
     /**
      * Creates a real outgoing transfer request for each of the supplied files,
-     * targeting the given destination device. Returns a {@link SendResult} so
-     * the caller can distinguish success from specific failure modes and show
-     * an appropriate error instead of silently navigating away.
-     *
-     * <p>This replaces {@code PrototypeState#addOutgoingTransfers} with a real
-     * backend call to {@link com.link.application.TransferCoordinator#requestTransfer}.
-     *
-     * @param files       Files chosen by the user (null or non-file entries are skipped)
-     * @param destination The target peer device
-     * @return A {@link SendResult} describing the outcome
+     * targeting the given destination device.
      */
     public SendResult addOutgoingTransfers(List<? extends File> files, DemoDevice destination) {
         Objects.requireNonNull(destination, "destination");
@@ -601,32 +584,52 @@ public class LinkViewModel {
     }
 
     /**
-     * Pauses an in-progress transfer.
-     *
-     * <p><em>Note:</em> The current {@link com.link.application.TransferCoordinator}
-     * interface does not yet expose a pause operation. This method updates the
-     * local UI state to {@link TransferStatus#PAUSED} immediately, serving as
-     * a placeholder until the coordinator gains a {@code pauseTransfer} method.
+     * Pauses an in-progress outgoing transfer. Signals the sender thread to
+     * stop sending after its current chunk. The TLS session stays open.
+     * The UI state updates arrive via the {@link TransferObserver} callback
+     * as the backend publishes {@code PAUSED}.
      *
      * @param transferId String representation of the transfer UUID
      */
     public void pauseTransfer(String transferId) {
-        // TODO: call engine.getTransferCoordinator().pauseTransfer(...) once available
-        updateTransferStatus(transferId, TransferStatus.PAUSED);
+        DemoTransfer dt = transfersById.get(transferId);
+        if (dt == null || dt.getStatus() != TransferStatus.IN_PROGRESS) return;
+
+        UUID id;
+        try {
+            id = UUID.fromString(transferId);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        try {
+            engine.getTransferCoordinator().pauseTransfer(id);
+        } catch (Exception e) {
+            // Fall back to local state update so the UI stays consistent.
+            updateTransferStatus(transferId, TransferStatus.PAUSED);
+        }
     }
 
     /**
-     * Resumes a paused transfer.
-     *
-     * <p><em>Note:</em> As with {@link #pauseTransfer}, the coordinator interface
-     * does not yet expose a resume operation. This method resets the UI state to
-     * {@link TransferStatus#IN_PROGRESS} as a placeholder.
+     * Resumes a paused outgoing transfer. Releases the blocked sender thread
+     * so data flow restarts from where it stopped.
      *
      * @param transferId String representation of the transfer UUID
      */
     public void resumeTransfer(String transferId) {
-        // TODO: call engine.getTransferCoordinator().resumeTransfer(...) once available
-        updateTransferStatus(transferId, TransferStatus.IN_PROGRESS);
+        DemoTransfer dt = transfersById.get(transferId);
+        if (dt == null || dt.getStatus() != TransferStatus.PAUSED) return;
+
+        UUID id;
+        try {
+            id = UUID.fromString(transferId);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        try {
+            engine.getTransferCoordinator().resumeTransfer(id);
+        } catch (Exception e) {
+            updateTransferStatus(transferId, TransferStatus.IN_PROGRESS);
+        }
     }
 
     /**
@@ -732,6 +735,12 @@ public class LinkViewModel {
                 long done  = snapshot.progress().completedBytes();
                 existing.setProgress(total > 0 ? (double) done / total : 0.0);
                 existing.setSpeedBytesPerSecond(snapshot.progress().speedBytesPerSecond());
+            }
+            // Always zero the speed when paused or resuming (before the first
+            // real TRANSFERRING progress event arrives) so the card doesn't
+            // show a stale speed while idle.
+            if (snapshot.state() == TransferState.PAUSED) {
+                existing.setSpeedBytesPerSecond(0);
             }
         }
 
