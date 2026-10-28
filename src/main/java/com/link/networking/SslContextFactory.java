@@ -2,7 +2,6 @@ package com.link.networking;
 
 import javax.net.ssl.*;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -83,91 +82,92 @@ public class SslContextFactory {
 
     private static X509Certificate generateSelfSignedCertificate(KeyPair keyPair) throws Exception {
         long now = System.currentTimeMillis();
-        Date notBefore = new Date(now - 1000L * 60 * 60 * 24);
-        Date notAfter = new Date(now + 1000L * 60 * 60 * 24 * 365);
+        Date notBefore = new Date(now - 86_400_000L);
+        Date notAfter  = new Date(now + 365L * 86_400_000L);
 
-        // Standard ASN.1 DER sequence construction for self-signed X.509
-        ByteArrayOutputStream tbs = new ByteArrayOutputStream();
-        tbs.write(new byte[]{0x02, 0x01, 0x00}); // Version v1 (0)
-        
-        BigInteger serial = BigInteger.valueOf(now);
+        // AlgorithmIdentifier for SHA256withRSA (OID 1.2.840.113549.1.1.11)
+        byte[] algId = new byte[]{
+            0x30, 0x0d,
+            0x06, 0x09, 0x2a, (byte)0x86, 0x48, (byte)0x86, (byte)0xf7, 0x0d, 0x01, 0x01, 0x0b,
+            0x05, 0x00
+        };
+
+        // Issuer / Subject Name: SEQUENCE { SET { SEQUENCE { OID CN, UTF8String "LinkP2P" } } }
+        byte[] name = new byte[]{
+            0x30, 0x13,
+            0x31, 0x11,
+            0x30, 0x0f,
+            0x06, 0x03, 0x55, 0x04, 0x03,        // OID 2.5.4.3 = CN
+            0x0c, 0x08,                            // UTF8String, length 8
+            'L', 'i', 'n', 'k', 'P', '2', 'P', '2'
+        };
+
+        // SerialNumber
+        BigInteger serial = BigInteger.valueOf(now & 0x7FFFFFFFFFFFFFFFL);
         byte[] serialBytes = serial.toByteArray();
-        tbs.write(0x02); // INTEGER
-        tbs.write(serialBytes.length);
-        tbs.write(serialBytes);
+        byte[] serialTlv = tlv(0x02, serialBytes);
 
-        // AlgorithmId: SHA256withRSA (1.2.840.113549.1.1.11)
-        byte[] algId = new byte[]{0x30, 0x0d, 0x06, 0x09, 0x2a, (byte)0x86, 0x48, (byte)0x86, (byte)0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00};
-        tbs.write(algId);
-
-        // Issuer & Subject Name: CN=LinkNode
-        byte[] name = new byte[]{0x30, 0x11, 0x31, 0x0f, 0x30, 0x0d, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x06, 'L', 'i', 'n', 'k', 'P', '2', 'P'};
-        tbs.write(name); // Issuer
-        
-        // Validity
-        ByteArrayOutputStream validity = new ByteArrayOutputStream();
-        writeUtcTime(validity, notBefore);
-        writeUtcTime(validity, notAfter);
-        writeSequence(tbs, validity.toByteArray());
-
-        tbs.write(name); // Subject
+        // Validity SEQUENCE { UTCTime notBefore, UTCTime notAfter }
+        byte[] validityTlv = tlv(0x30, concat(utcTime(notBefore), utcTime(notAfter)));
 
         // SubjectPublicKeyInfo
-        tbs.write(keyPair.getPublic().getEncoded());
+        byte[] spki = keyPair.getPublic().getEncoded();
 
-        ByteArrayOutputStream tbsSeq = new ByteArrayOutputStream();
-        writeSequence(tbsSeq, tbs.toByteArray());
-        byte[] tbsBytes = tbsSeq.toByteArray();
+        // TBSCertificate body (v1: no explicit Version field)
+        byte[] tbsBody = concat(serialTlv, algId, name, validityTlv, name, spki);
+        byte[] tbsCert = tlv(0x30, tbsBody);
 
-        // Sign TBS
+        // Sign the TBSCertificate
         Signature sig = Signature.getInstance("SHA256withRSA");
         sig.initSign(keyPair.getPrivate());
-        sig.update(tbsBytes);
-        byte[] signature = sig.sign();
+        sig.update(tbsCert);
+        byte[] sigBytes = sig.sign();
 
-        // Wrap full Certificate sequence
-        ByteArrayOutputStream certStream = new ByteArrayOutputStream();
-        certStream.write(tbsBytes);
-        certStream.write(algId);
-        
-        // BIT STRING for signature
-        certStream.write(0x03);
-        certStream.write(signature.length + 1);
-        certStream.write(0x00); // 0 unused bits
-        certStream.write(signature);
+        // BIT STRING: tag 0x03 + length + 0x00 (no unused bits) + signature bytes
+        byte[] bitStringContent = concat(new byte[]{0x00}, sigBytes);
+        byte[] bitStringTlv = tlv(0x03, bitStringContent);
 
-        ByteArrayOutputStream fullCert = new ByteArrayOutputStream();
-        writeSequence(fullCert, certStream.toByteArray());
+        // Full certificate: SEQUENCE { TBSCertificate, AlgorithmId, BIT STRING }
+        byte[] certDer = tlv(0x30, concat(tbsCert, algId, bitStringTlv));
 
         CertificateFactory cf = CertificateFactory.getInstance("X.509");
-        return (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(fullCert.toByteArray()));
+        return (X509Certificate) cf.generateCertificate(
+                new java.io.ByteArrayInputStream(certDer));
     }
 
-    private static void writeSequence(ByteArrayOutputStream out, byte[] data) {
-        out.write(0x30);
-        writeLength(out, data.length);
-        out.write(data, 0, data.length);
-    }
-
-    private static void writeLength(ByteArrayOutputStream out, int length) {
-        if (length < 128) {
-            out.write(length);
-        } else if (length < 256) {
-            out.write(0x81);
-            out.write(length);
+    /** Encode a DER TLV: tag byte + proper length encoding + value bytes. */
+    private static byte[] tlv(int tag, byte[] value) {
+        int len = value.length;
+        byte[] lenBytes;
+        if (len < 128) {
+            lenBytes = new byte[]{(byte) len};
+        } else if (len < 256) {
+            lenBytes = new byte[]{(byte) 0x81, (byte) len};
         } else {
-            out.write(0x82);
-            out.write((length >> 8) & 0xFF);
-            out.write(length & 0xFF);
+            lenBytes = new byte[]{(byte) 0x82, (byte) (len >> 8), (byte) (len & 0xFF)};
         }
+        byte[] result = new byte[1 + lenBytes.length + len];
+        result[0] = (byte) tag;
+        System.arraycopy(lenBytes, 0, result, 1, lenBytes.length);
+        System.arraycopy(value, 0, result, 1 + lenBytes.length, len);
+        return result;
     }
 
-    private static void writeUtcTime(ByteArrayOutputStream out, Date date) {
+    /** Encode a Date as a DER UTCTime (tag 0x17). */
+    private static byte[] utcTime(Date date) {
         java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyMMddHHmmss'Z'");
         sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
         byte[] bytes = sdf.format(date).getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-        out.write(0x17); // UTCTime tag
-        out.write(bytes.length);
-        out.write(bytes, 0, bytes.length);
+        return tlv(0x17, bytes);
+    }
+
+    /** Concatenate byte arrays. */
+    private static byte[] concat(byte[]... arrays) {
+        int total = 0;
+        for (byte[] a : arrays) total += a.length;
+        byte[] result = new byte[total];
+        int pos = 0;
+        for (byte[] a : arrays) { System.arraycopy(a, 0, result, pos, a.length); pos += a.length; }
+        return result;
     }
 }
