@@ -35,7 +35,9 @@ public class StreamWorker {
         return manifest;
     }
 
-    public void sendFiles(SecureSession session, List<Path> sourcePaths, long resumeOffset, ProgressCallback callback) throws Exception {
+    public void sendFiles(SecureSession session, List<Path> sourcePaths, long resumeOffset,
+                          SessionRepository.PauseHandle pauseHandle,
+                          ProgressCallback callback) throws Exception {
         long overallCompletedBytes = 0;
 
         for (Path path : sourcePaths) {
@@ -52,6 +54,14 @@ public class StreamWorker {
                 byte[] buffer = new byte[8192];
                 int read;
                 while ((read = raf.read(buffer)) > 0) {
+                    // Check pause flag between every chunk. If paused, block here
+                    // until resumeTransfer() releases the latch. The sender thread
+                    // simply stops writing; the receiver blocks on receiveData()
+                    // until chunks start flowing again.
+                    if (pauseHandle.isPaused()) {
+                        pauseHandle.awaitResume();
+                    }
+
                     if (read == buffer.length) {
                         session.sendData(buffer);
                     } else {

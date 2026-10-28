@@ -601,32 +601,52 @@ public class LinkViewModel {
     }
 
     /**
-     * Pauses an in-progress transfer.
-     *
-     * <p><em>Note:</em> The current {@link com.link.application.TransferCoordinator}
-     * interface does not yet expose a pause operation. This method updates the
-     * local UI state to {@link TransferStatus#PAUSED} immediately, serving as
-     * a placeholder until the coordinator gains a {@code pauseTransfer} method.
+     * Pauses an in-progress outgoing transfer. Signals the sender thread to
+     * stop sending after its current chunk. The TLS session stays open.
+     * The UI state updates arrive via the {@link TransferObserver} callback
+     * as the backend publishes {@code PAUSED}.
      *
      * @param transferId String representation of the transfer UUID
      */
     public void pauseTransfer(String transferId) {
-        // TODO: call engine.getTransferCoordinator().pauseTransfer(...) once available
-        updateTransferStatus(transferId, TransferStatus.PAUSED);
+        DemoTransfer dt = transfersById.get(transferId);
+        if (dt == null || dt.getStatus() != TransferStatus.IN_PROGRESS) return;
+
+        UUID id;
+        try {
+            id = UUID.fromString(transferId);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        try {
+            engine.getTransferCoordinator().pauseTransfer(id);
+        } catch (Exception e) {
+            // Fall back to local state update so the UI stays consistent.
+            updateTransferStatus(transferId, TransferStatus.PAUSED);
+        }
     }
 
     /**
-     * Resumes a paused transfer.
-     *
-     * <p><em>Note:</em> As with {@link #pauseTransfer}, the coordinator interface
-     * does not yet expose a resume operation. This method resets the UI state to
-     * {@link TransferStatus#IN_PROGRESS} as a placeholder.
+     * Resumes a paused outgoing transfer. Releases the blocked sender thread
+     * so data flow restarts from where it stopped.
      *
      * @param transferId String representation of the transfer UUID
      */
     public void resumeTransfer(String transferId) {
-        // TODO: call engine.getTransferCoordinator().resumeTransfer(...) once available
-        updateTransferStatus(transferId, TransferStatus.IN_PROGRESS);
+        DemoTransfer dt = transfersById.get(transferId);
+        if (dt == null || dt.getStatus() != TransferStatus.PAUSED) return;
+
+        UUID id;
+        try {
+            id = UUID.fromString(transferId);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        try {
+            engine.getTransferCoordinator().resumeTransfer(id);
+        } catch (Exception e) {
+            updateTransferStatus(transferId, TransferStatus.IN_PROGRESS);
+        }
     }
 
     /**

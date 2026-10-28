@@ -52,4 +52,16 @@ public class DefaultTransferCoordinator implements TransferCoordinator {
         repository.updateTransferState(transferId.toString(), "CANCELLED", 0L);
         fileTransferEngine.cancelTransfer(transferId);
     }
+
+    @Override
+    public void pauseTransfer(UUID transferId) {
+        repository.updateTransferState(transferId.toString(), "PAUSED", 0L);
+        fileTransferEngine.pauseTransfer(transferId);
+    }
+
+    @Override
+    public void resumeTransfer(UUID transferId) {
+        repository.updateTransferState(transferId.toString(), "TRANSFERRING", 0L);
+        fileTransferEngine.resumeTransfer(transferId);
+    }
 }

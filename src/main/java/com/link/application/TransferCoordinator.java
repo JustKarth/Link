@@ -11,4 +11,6 @@ public interface TransferCoordinator {
     void rejectTransfer(UUID transferId);
     void cancelTransfer(UUID transferId);
     void confirmPairing(UUID transferId, boolean accepted);
+    void pauseTransfer(UUID transferId);
+    void resumeTransfer(UUID transferId);
 }
