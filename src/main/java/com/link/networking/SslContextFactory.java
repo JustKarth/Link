@@ -7,6 +7,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.math.BigInteger;
+import java.net.Socket;
 import java.security.*;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -52,11 +53,27 @@ public class SslContextFactory {
                 kmf.init(keyStore, KEYSTORE_PASS);
 
                 TrustManager[] trustAllCerts = new TrustManager[]{
-                    new X509TrustManager() {
-                        // Return an empty array to prevent NPEs in the TLS engine
+                    new javax.net.ssl.X509ExtendedTrustManager() {
+                        @Override
                         public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                        
+                        @Override
                         public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                        
+                        @Override
                         public void checkServerTrusted(X509Certificate[] certs, String authType) {}
+                        
+                        @Override
+                        public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket) {}
+                        
+                        @Override
+                        public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket) {}
+                        
+                        @Override
+                        public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {}
+                        
+                        @Override
+                        public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {}
                     }
                 };
 
