@@ -75,20 +75,29 @@ public class StreamWorker {
 
             try (FileOutputStream fos = new FileOutputStream(tempFile, true)) {
                 long fileReceived = fileAlreadyOnDisk;
+                long remaining = fi.fileSize() - fileReceived;
 
-                while (fileReceived < fi.fileSize()) {
+                while (remaining > 0) {
                     byte[] chunk = session.receiveData();
-                    if (chunk.length > 0 && chunk[0] == '{') {
-                        String maybeJson = new String(chunk);
-                        if (maybeJson.contains("TRANSFER_COMPLETED")) break;
-                    }
-                    
-                    fos.write(chunk);
-                    fileReceived += chunk.length;
-                    overallReceived += chunk.length;
+                    // Guard: never write more than the declared file size
+                    int toWrite = (int) Math.min(chunk.length, remaining);
+                    fos.write(chunk, 0, toWrite);
+                    fileReceived += toWrite;
+                    overallReceived += toWrite;
+                    remaining -= toWrite;
                     callback.onProgress(overallReceived);
                 }
             }
+        }
+        // Read the TRANSFER_COMPLETED control frame that the sender sends after
+        // streaming all file data. This keeps control messages on their own
+        // dedicated receive path and avoids the previous JSON-sniffing heuristic
+        // that could misidentify binary data starting with '{' as a control frame.
+        try {
+            session.receiveMessage(); // consumes the TRANSFER_COMPLETED frame
+        } catch (Exception ignored) {
+            // If the session closes before we read the completion frame that is
+            // still fine — all bytes were already written and verified separately.
         }
         return true;
     }
