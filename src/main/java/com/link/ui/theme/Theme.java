@@ -36,9 +36,10 @@ public final class Theme {
     public static final Color WARNING = Color.web("#F5B664");
     public static final Color ERROR   = Color.web("#EC6A6B");
 
-    /** A soft tint of a colour at ~14% opacity, for icon-wrap backgrounds. */
+    /** A soft tint of a colour at the given opacity, clamped to [0.0, 1.0]. */
     public static Color soft(Color c, double alpha) {
-        return Color.color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
+        double a = Math.max(0.0, Math.min(1.0, alpha));
+        return Color.color(c.getRed(), c.getGreen(), c.getBlue(), a);
     }
 
     /** CSS rgba() string for inline styling of dynamically-coloured Regions. */
