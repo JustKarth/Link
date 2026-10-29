@@ -8,7 +8,9 @@ public class TransferProtocolManager {
     private final ObjectMapper mapper = new ObjectMapper();
 
     public void sendMessage(SecureSession session, ControlMessage message) throws Exception {
-        session.sendMessage(mapper.writeValueAsString(message));
+        synchronized (session) {
+            session.sendMessage(mapper.writeValueAsString(message));
+        }
     }
 
     public ControlMessage receiveMessage(SecureSession session) throws Exception {

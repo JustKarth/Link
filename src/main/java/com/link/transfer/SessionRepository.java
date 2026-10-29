@@ -1,6 +1,7 @@
 package com.link.transfer;
 
 import com.link.domain.Peer;
+import com.link.domain.TransferDirection;
 import com.link.networking.SecureSession;
 import com.link.transfer.models.ControlMessage;
 import com.link.transfer.models.IncomingBatchState;
@@ -9,16 +10,85 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class SessionRepository {
     private final Map<UUID, SecureSession> activeSessions = new ConcurrentHashMap<>();
     private final Map<UUID, IncomingBatchState> incomingBatches = new ConcurrentHashMap<>();
+    private final Map<UUID, PairingPendingState> pendingPairings = new ConcurrentHashMap<>();
     private final Map<UUID, OutgoingPendingState> pendingOutgoing = new ConcurrentHashMap<>();
     private final Map<UUID, IncomingPendingState> pendingIncoming = new ConcurrentHashMap<>();
     private final Map<UUID, PauseHandle> pauseHandles = new ConcurrentHashMap<>();
+
+    /**
+     * Unified pending state for an active pairing session (either initiating or receiving).
+     */
+    public static final class PairingPendingState {
+        private final UUID transferId;
+        private final SecureSession session;
+        private final Peer peer;
+        private final String fingerprint;
+        private final TransferDirection direction;
+        private final List<Path> sourcePaths;
+        private final String summaryName;
+        private final CompletableFuture<Boolean> localDecision = new CompletableFuture<>();
+        private final AtomicBoolean completed = new AtomicBoolean(false);
+        private volatile ScheduledFuture<?> timeoutFuture;
+
+        public PairingPendingState(
+                UUID transferId,
+                SecureSession session,
+                Peer peer,
+                String fingerprint,
+                TransferDirection direction,
+                List<Path> sourcePaths,
+                String summaryName) {
+            this.transferId = transferId;
+            this.session = session;
+            this.peer = peer;
+            this.fingerprint = fingerprint;
+            this.direction = direction;
+            this.sourcePaths = sourcePaths;
+            this.summaryName = summaryName;
+        }
+
+        public UUID transferId() { return transferId; }
+        public SecureSession session() { return session; }
+        public Peer peer() { return peer; }
+        public String fingerprint() { return fingerprint; }
+        public TransferDirection direction() { return direction; }
+        public List<Path> sourcePaths() { return sourcePaths; }
+        public String summaryName() { return summaryName; }
+        public CompletableFuture<Boolean> localDecision() { return localDecision; }
+
+        public void setTimeoutFuture(ScheduledFuture<?> future) {
+            this.timeoutFuture = future;
+        }
+
+        public void completeSuccess() {
+            if (completed.compareAndSet(false, true)) {
+                if (timeoutFuture != null) {
+                    timeoutFuture.cancel(false);
+                }
+            }
+        }
+
+        public void cancel() {
+            if (completed.compareAndSet(false, true)) {
+                if (timeoutFuture != null) {
+                    timeoutFuture.cancel(false);
+                }
+                localDecision.complete(false);
+                try {
+                    session.close();
+                } catch (Exception ignored) {}
+            }
+        }
+    }
 
     /**
      * Coordinates pause/resume for an active sender-side transfer.
@@ -77,18 +147,36 @@ public class SessionRepository {
         return incomingBatches.get(transferId);
     }
 
+    public void addPendingPairing(UUID transferId, PairingPendingState state) {
+        pendingPairings.put(transferId, state);
+    }
+
+    public PairingPendingState getPendingPairing(UUID transferId) {
+        return pendingPairings.get(transferId);
+    }
+
+    public PairingPendingState removePendingPairing(UUID transferId) {
+        return pendingPairings.remove(transferId);
+    }
+
     public void clear(UUID transferId) {
         SecureSession session = activeSessions.remove(transferId);
         if (session != null) {
             session.close();
         }
         incomingBatches.remove(transferId);
+        PairingPendingState pairing = pendingPairings.remove(transferId);
+        if (pairing != null) {
+            pairing.cancel();
+        }
+        pendingOutgoing.remove(transferId);
+        pendingIncoming.remove(transferId);
         PauseHandle handle = pauseHandles.remove(transferId);
         if (handle != null) {
-            // Make sure a blocked sender thread is unblocked so it can exit.
             handle.resume();
         }
     }
+
     public void addPendingIncoming(UUID transferId, IncomingPendingState state) {
         pendingIncoming.put(transferId, state);
     }
