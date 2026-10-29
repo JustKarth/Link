@@ -14,13 +14,19 @@ import com.link.transfer.models.FileInfo;
 import com.link.transfer.models.IncomingBatchState;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 public class FileTransferEngine {
+
+    private static final long PAIRING_TIMEOUT_SECONDS = 60;
 
     private final String localPeerId;
     private final String localDisplayName;
@@ -34,6 +40,11 @@ public class FileTransferEngine {
     private final PeerTrustService trustService;
     
     private final ExecutorService transferPool = Executors.newCachedThreadPool();
+    private final ScheduledExecutorService pairingScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "Link-PairingTimeoutScheduler");
+        t.setDaemon(true);
+        return t;
+    });
 
     public FileTransferEngine(
             String localPeerId, String localDisplayName,
@@ -68,48 +79,101 @@ public class FileTransferEngine {
                 session = connectionManager.connect(targetPeer);
                 
                 String peerFingerprint = session.getRemoteFingerprint();
+                boolean senderTrustsPeer = trustService.isPeerTrusted(targetPeer.id().value(), peerFingerprint);
 
-                if (!trustService.isPeerTrusted(targetPeer.id().toString(), peerFingerprint)) {
-                    String sasCode = session.getSasPairingCode();
-                    repository.addPendingOutgoing(transferId, new SessionRepository.OutgoingPendingState(targetPeer, session, sourcePaths, peerFingerprint));
-                    publisher.publish(transferId, summaryName, TransferDirection.SENDING, targetPeer, TransferState.PAIRING, new TransferProgress(0, 0, 0), null, sasCode);
-                    return; 
+                // 1. Initial pairing/identity hello
+                ControlMessage hello = new ControlMessage(
+                    "HANDSHAKE_HELLO",
+                    transferId.toString(),
+                    summaryName,
+                    0,
+                    null,
+                    localPeerId,
+                    localDisplayName,
+                    null,
+                    0,
+                    senderTrustsPeer
+                );
+                protocolManager.sendMessage(session, hello);
+
+                // 2. Wait for receiver handshake response
+                ControlMessage response = protocolManager.receiveMessage(session);
+                if (!"HANDSHAKE_RESPONSE".equals(response.type())) {
+                    throw new IOException("Unexpected handshake response: " + response.type());
+                }
+
+                boolean receiverTrustsPeer = response.senderTrustsPeer();
+                boolean pairingRequired = (!senderTrustsPeer || !receiverTrustsPeer);
+
+                if (pairingRequired) {
+                    boolean paired = performPairing(transferId, session, targetPeer, peerFingerprint, TransferDirection.SENDING, sourcePaths, summaryName);
+                    if (!paired) {
+                        return;
+                    }
                 }
 
                 proceedWithOutgoingTransfer(transferId, targetPeer, session, sourcePaths);
 
             } catch (Exception e) {
-        System.err.println(
-            "[Link] Outgoing setup failed. Transfer=" + transferId
-            + ", peer=" + peerId.value()
-        );
-        e.printStackTrace(System.err);
+                System.err.println(
+                    "[Link] Outgoing setup failed. Transfer=" + transferId
+                    + ", peer=" + peerId.value()
+                );
+                e.printStackTrace(System.err);
 
-        if (session != null) {
-            session.close();
-        }
+                if (session != null) {
+                    session.close();
+                }
 
-        publisher.publish(
-            transferId,
-            summaryName,
-            TransferDirection.SENDING,
-            null,
-            TransferState.FAILED,
-            new TransferProgress(0, 0, 0),
-            e.getMessage()
-        );
+                publisher.publish(
+                    transferId,
+                    summaryName,
+                    TransferDirection.SENDING,
+                    null,
+                    TransferState.FAILED,
+                    new TransferProgress(0, 0, 0),
+                    e.getMessage()
+                );
 
-        cleanupSession(transferId);
-    }
+                cleanupSession(transferId);
+            }
         });
     }
 
     public void confirmPairing(UUID transferId, boolean accepted) {
         transferPool.submit(() -> {
+            SessionRepository.PairingPendingState pending = repository.getPendingPairing(transferId);
+            if (pending != null) {
+                if (!accepted) {
+                    repository.removePendingPairing(transferId);
+                    try {
+                        protocolManager.sendMessage(pending.session(), 
+                            new ControlMessage("PAIRING_REJECT", transferId.toString(), null, 0, null, localPeerId, localDisplayName, null, 0));
+                    } catch (Exception ignored) {}
+
+                    pending.cancel();
+                    publisher.publish(transferId, pending.summaryName(), pending.direction(), pending.peer(), 
+                        TransferState.CANCELLED, null, "Pairing rejected by local user", null);
+                } else {
+                    pending.localDecision().complete(true);
+                    try {
+                        protocolManager.sendMessage(pending.session(), 
+                            new ControlMessage("PAIRING_ACCEPT", transferId.toString(), null, 0, null, localPeerId, localDisplayName, null, 0));
+                    } catch (Exception e) {
+                        repository.removePendingPairing(transferId);
+                        pending.cancel();
+                        publisher.publish(transferId, pending.summaryName(), pending.direction(), pending.peer(),
+                            TransferState.FAILED, null, "Connection lost during pairing", null);
+                    }
+                }
+                return;
+            }
+
+            // Legacy fallback if any old state exists
             SessionRepository.OutgoingPendingState pendingOut = repository.getAndRemovePendingOutgoing(transferId);
             if (pendingOut != null) {
                 if (accepted) {
-                    trustService.trustPeer(pendingOut.targetPeer().id().toString(), pendingOut.fingerprint());
+                    trustService.trustPeer(pendingOut.targetPeer().id().value(), pendingOut.fingerprint());
                     proceedWithOutgoingTransfer(transferId, pendingOut.targetPeer(), pendingOut.session(), pendingOut.sourcePaths());
                 } else {
                     pendingOut.session().close();
@@ -139,33 +203,167 @@ public class FileTransferEngine {
     public void handleIncomingSession(SecureSession session) {
         transferPool.submit(() -> {
             try {
-                ControlMessage request = protocolManager.receiveMessage(session);
+                ControlMessage msg = protocolManager.receiveMessage(session);
 
-                if ("TRANSFER_REQUEST".equals(request.type())) {
-                    UUID transferId = UUID.fromString(request.transferId());
-                    
-                    String peerFingerprint = session.getRemoteFingerprint();
-                    String senderId = request.senderId();
-
-                    if (!trustService.isPeerTrusted(senderId, peerFingerprint)) {
-                        String sasCode = session.getSasPairingCode();
-                        
-                        repository.addPendingIncoming(transferId, new SessionRepository.IncomingPendingState(request, session, peerFingerprint));
-                        
-                        Peer senderPeer = new Peer(new PeerId(senderId), request.senderDisplayName(), "", false);
-                        
-                        publisher.publish(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.PAIRING, new TransferProgress(0, 0, 0), null, sasCode);
-                        return; 
-                    }
-
-                    proceedWithIncomingTransfer(transferId, request, session);
+                if ("TRANSFER_REQUEST".equals(msg.type())) {
+                    handleLegacyIncomingTransfer(session, msg);
+                    return;
                 }
+
+                if (!"HANDSHAKE_HELLO".equals(msg.type())) {
+                    throw new IOException("Unexpected handshake message: " + msg.type());
+                }
+
+                UUID transferId;
+                try {
+                    transferId = UUID.fromString(msg.transferId());
+                } catch (Exception e) {
+                    throw new IOException("Invalid transferId in handshake: " + msg.transferId());
+                }
+
+                String senderId = msg.senderId();
+                String senderDisplayName = msg.senderDisplayName();
+                String summaryName = msg.fileName() != null ? msg.fileName() : "Incoming transfer";
+                boolean senderTrustsPeer = msg.senderTrustsPeer();
+
+                String peerFingerprint = session.getRemoteFingerprint();
+                boolean receiverTrustsPeer = trustService.isPeerTrusted(senderId, peerFingerprint);
+
+                Peer senderPeer = new Peer(new PeerId(senderId), senderDisplayName, "", false);
+
+                boolean pairingRequired = (!senderTrustsPeer || !receiverTrustsPeer);
+
+                // Send handshake response acknowledging trust state
+                ControlMessage response = new ControlMessage(
+                    "HANDSHAKE_RESPONSE",
+                    transferId.toString(),
+                    null,
+                    0,
+                    null,
+                    localPeerId,
+                    localDisplayName,
+                    null,
+                    0,
+                    receiverTrustsPeer
+                );
+                protocolManager.sendMessage(session, response);
+
+                if (pairingRequired) {
+                    boolean paired = performPairing(transferId, session, senderPeer, peerFingerprint, TransferDirection.RECEIVING, null, summaryName);
+                    if (!paired) {
+                        return;
+                    }
+                }
+
+                // Proceed to read the TRANSFER_REQUEST on the same session
+                ControlMessage request = protocolManager.receiveMessage(session);
+                if (!"TRANSFER_REQUEST".equals(request.type())) {
+                    throw new IOException("Expected TRANSFER_REQUEST, got: " + request.type());
+                }
+
+                proceedWithIncomingTransfer(transferId, request, session);
+
             } catch (Exception e) {
-    System.err.println("[Link] Incoming session failed.");
-    e.printStackTrace(System.err);
-    session.close();
-}
+                System.err.println("[Link] Incoming session failed: " + e.getMessage());
+                e.printStackTrace(System.err);
+                session.close();
+            }
         });
+    }
+
+    private void handleLegacyIncomingTransfer(SecureSession session, ControlMessage request) {
+        UUID transferId = UUID.fromString(request.transferId());
+        String peerFingerprint = session.getRemoteFingerprint();
+        String senderId = request.senderId();
+
+        if (!trustService.isPeerTrusted(senderId, peerFingerprint)) {
+            String sasCode = session.getSasPairingCode();
+            repository.addPendingIncoming(transferId, new SessionRepository.IncomingPendingState(request, session, peerFingerprint));
+            Peer senderPeer = new Peer(new PeerId(senderId), request.senderDisplayName(), "", false);
+            publisher.publish(transferId, request.fileName(), TransferDirection.RECEIVING, senderPeer, TransferState.PAIRING, new TransferProgress(0, 0, 0), null, sasCode);
+            return;
+        }
+
+        proceedWithIncomingTransfer(transferId, request, session);
+    }
+
+    private boolean performPairing(
+            UUID transferId, 
+            SecureSession session, 
+            Peer peer, 
+            String peerFingerprint, 
+            TransferDirection direction, 
+            List<Path> sourcePaths, 
+            String summaryName) {
+
+        String sasCode = session.getSasPairingCode();
+        SessionRepository.PairingPendingState state = new SessionRepository.PairingPendingState(
+            transferId, session, peer, peerFingerprint, direction, sourcePaths, summaryName
+        );
+        repository.addPendingPairing(transferId, state);
+
+        ScheduledFuture<?> timeoutFuture = pairingScheduler.schedule(() -> {
+            SessionRepository.PairingPendingState p = repository.removePendingPairing(transferId);
+            if (p != null) {
+                p.cancel();
+                publisher.publish(transferId, summaryName, direction, peer, TransferState.FAILED, 
+                    new TransferProgress(0, 0, 0), "Pairing timed out", null);
+            }
+        }, PAIRING_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        state.setTimeoutFuture(timeoutFuture);
+
+        // Publish PAIRING state so both devices display the SAS code simultaneously
+        publisher.publish(transferId, summaryName, direction, peer, TransferState.PAIRING, 
+            new TransferProgress(0, 0, 0), null, sasCode);
+
+        // Exactly one reader on the session: read remote peer's decision
+        boolean remoteAccepted = false;
+        try {
+            ControlMessage remoteMsg = protocolManager.receiveMessage(session);
+            remoteAccepted = "PAIRING_ACCEPT".equals(remoteMsg.type());
+        } catch (Exception e) {
+            remoteAccepted = false;
+        }
+
+        if (!remoteAccepted) {
+            SessionRepository.PairingPendingState p = repository.removePendingPairing(transferId);
+            if (p != null) {
+                p.cancel();
+                publisher.publish(transferId, summaryName, direction, peer, TransferState.CANCELLED, 
+                    null, "Pairing rejected by peer", null);
+            }
+            return false;
+        }
+
+        // Remote peer accepted; wait for local user's decision
+        Boolean localAccepted = false;
+        try {
+            localAccepted = state.localDecision().get(PAIRING_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            localAccepted = false;
+        }
+
+        if (!Boolean.TRUE.equals(localAccepted)) {
+            SessionRepository.PairingPendingState p = repository.removePendingPairing(transferId);
+            if (p != null) {
+                p.cancel();
+                publisher.publish(transferId, summaryName, direction, peer, TransferState.CANCELLED, 
+                    null, "Pairing rejected", null);
+            }
+            return false;
+        }
+
+        // Both accepted!
+        SessionRepository.PairingPendingState p = repository.removePendingPairing(transferId);
+        if (p != null) {
+            p.completeSuccess();
+        } else {
+            return false;
+        }
+
+        // Persist permanent trust only after mutual positive confirmation
+        trustService.trustPeer(peer.id().value(), peerFingerprint);
+        return true;
     }
 
     public void acceptTransfer(UUID transferId, Path destinationDirectory) {
@@ -230,6 +428,16 @@ public class FileTransferEngine {
     }
 
     public void cancelTransfer(UUID transferId) {
+        SessionRepository.PairingPendingState pairing = repository.removePendingPairing(transferId);
+        if (pairing != null) {
+            try {
+                protocolManager.sendMessage(pairing.session(), 
+                    new ControlMessage("PAIRING_REJECT", transferId.toString(), null, 0, null, localPeerId, localDisplayName, null, 0));
+            } catch (Exception ignored) {}
+            pairing.cancel();
+            publisher.publish(transferId, pairing.summaryName(), pairing.direction(), pairing.peer(), 
+                TransferState.CANCELLED, null, "Transfer cancelled", null);
+        }
         IncomingBatchState batch = repository.getBatch(transferId);
         if (batch != null) {
             streamWorker.cleanupTempFiles(batch.files(), batch.destDir());
